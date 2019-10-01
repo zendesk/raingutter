@@ -1,0 +1,14 @@
+language: go
+go:
+  - 1.9
+install:
+  - go get -u github.com/golang/dep/cmd/dep
+  - dep ensure
+script:
+  - go test ./raingutter -v
+  - docker run --rm -i hadolint/hadolint < Dockerfile
+group: stable
+dist: trusty
+os: linux
+branches:
+  only: master

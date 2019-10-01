@@ -1,0 +1,20 @@
+[Unit]
+Description=raingutter service
+After=network.target
+
+[Service]
+Type=simple
+User=raingutter
+Group=raingutter
+LimitNOFILE=1024
+
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=20
+StartLimitInterval=20
+
+ExecStart=/usr/local/bin/raingutter
+PermissionsStartOnly=true
+
+[Install]
+WantedBy=multi-user.target

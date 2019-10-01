@@ -1,0 +1,8 @@
+#!/bin/bash
+
+set -e
+
+export RG_FREQUENCY="100"
+
+exec 2>&1
+exec chpst -u raingutter:raingutter /usr/local/bin/raingutter

@@ -1,0 +1,19 @@
+---
+steps:
+  - id: "docker-build"
+    name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--build-arg'
+      - 'version=${TAG_NAME}'
+      - '--tag=gcr.io/$PROJECT_ID/apps/raingutter:latest'
+      - '--tag=gcr.io/$PROJECT_ID/apps/raingutter:$TAG_NAME'
+      - '--tag=gcr.io/$PROJECT_ID/apps/raingutter:$COMMIT_SHA'
+      - '--label=zendesk_base_image_name=scratch'
+      - '--file=Dockerfile'
+      - '.'
+
+images:
+  - 'gcr.io/$PROJECT_ID/apps/raingutter:latest'
+  - 'gcr.io/$PROJECT_ID/apps/raingutter:$TAG_NAME'
+  - 'gcr.io/$PROJECT_ID/apps/raingutter:$COMMIT_SHA'
