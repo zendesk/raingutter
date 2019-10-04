@@ -27,7 +27,7 @@ The stats polled by Raingutter can be streamed as [histograms](https://docs.data
 ## Usage
 
 Raingutter is a single binary that can either run as a [sidecar container](https://kubernetes.io/docs/concepts/workloads/pods/pod-overview/) if your application is deployed on Kubernetes or as daemon (both `systemd` and `runit` are supported).
-More information about how to build a `deb` package can be found in BUILD.md
+More information about how to build a `deb` package can be found in the build section
 
 The following environment variables can be used to configure Raingutter:
 
@@ -111,6 +111,46 @@ spec:
        securityContext:
           runAsNonRoot: true
           readOnlyRootFilesystem: true
+```
+
+## Build
+
+Build a Debian package for Ubuntu 16.04 (systemd)
+
+```
+$ vagrant up systemd
+$ vagrant ssh systemd
+$ make systemd_pkg
+```
+
+## Development
+
+Setup a local k8s testing environment with Skaffold:
+
+1. Make sure to have Kubernetes available locally (docker-for-mac with K8s enabled is the easiest solution)
+2. Install [Skaffold](https://github.com/GoogleContainerTools/skaffold) and run it in development mode
+```
+$ skaffold dev
+```
+3. (OPTIONAL) Install Prometheus and Grafana on K8s
+```
+$ helm init
+$ helm install \
+    --name=prometheus \
+    --version=7.0.0 \
+    stable/prometheus
+$ helm install \
+    --name=grafana \
+    --version=1.12.0 \
+    --set=adminUser=somepassword \
+    --set=adminPassword=somepassword \
+    --set=service.type=NodePort \
+    stable/grafana
+```
+4. Get the service port via: `kubectl get svc` and login on `http://localhost:<service-port>/login`
+5. Use port-forward to hit the Prometheus endpoint
+```
+export pod=$(kubectl get pods -l app=rg -o go-template --template '{{range .items}}{{.metadata.name}}{{"\n"}}{{end}}'); kubectl port-forward $pod 8000
 ```
 
 ## Contributors
