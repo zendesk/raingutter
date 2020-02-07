@@ -1,4 +1,4 @@
-FROM golang:1.13 as builder
+FROM golang:1.16.3-alpine3.13 as builder
 
 LABEL maintainer "GUIDEOPS <guideops@zendesk.com>"
 
@@ -9,7 +9,7 @@ RUN go get -u github.com/catkins/statsd-logger/trace
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOARCH=amd64 go build -a -o /mock-dogstatsd mock-dogstatsd.go
+RUN CGO_ENABLED=0 GOARCH=amd64 go build -a -mod=vendor -o /mock-dogstatsd mock-dogstatsd.go
 FROM alpine
 
 RUN addgroup -g 1000 -S datadog && \
