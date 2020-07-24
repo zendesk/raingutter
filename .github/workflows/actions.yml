@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       APP_ENV: test
+      GOPATH: ${{ github.workspace }}/gopath
+      GOPRIVATE: github.com/zendesk/*
     steps:
     - uses: zendesk/checkout@v2
       with:
