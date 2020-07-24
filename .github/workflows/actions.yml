@@ -23,9 +23,9 @@ jobs:
       run: |
         unset GOPROXY
         git config --global url."https://${{ secrets.ORG_GITHUB_TOKEN }}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+        cd ${{ github.workspace }}/gopath/src/github.com/zendesk/${{ github.repository }}
         go get -u github.com/golang/dep/cmd/dep
         dep ensure
-        cd ${{ github.workspace }}/gopath/src/github.com/zendesk/${{ github.repository }}
         go test ./raingutter -v
         docker run --rm -i hadolint/hadolint < Dockerfile
 
