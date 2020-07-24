@@ -7,7 +7,7 @@ on:
 jobs:
   main:
     name: go-lang
-    runs-on: [self-hosted, zendesk-stable]
+    runs-on: ubuntu-latest
     env:
       APP_ENV: test
     steps:
