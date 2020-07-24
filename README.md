@@ -1,3 +1,4 @@
+![repo-checks](https://github.com/zendesk/raingutter/workflows/repo-checks/badge.svg)
 ## Overview
 
 For pre-forking HTTP servers like [Unicorn](https://bogomips.org/unicorn/), workers utilization is an important capacity indicator, which can help to avoid requests queuing.
