@@ -44,6 +44,7 @@ The following environment variables can be used to configure Raingutter:
 * `RG_STATSD_HOST`: IP address of the local dogstatsd instance (required if `RG_STATSD_ENABLED` is `true`)
 * `RG_STATSD_PORT`: Port number of the local dogstatsd instance (required if `RG_STATSD_ENABLED` is `true`)
 * `RG_STATSD_NAMESPACE`: A string to prepend to all statsd calls (default: `unicorn.raingutter.agg.`)
+* `RG_STATSD_EXTRA_TAGS`: A list of extra tags to be passed to dogstatsd, as comma-separated key:value pairs (ie. `tagname:tagvalue,anothertag:anothervalue`)
 
 ##### PROMETHEUS
 * `RG_PROMETHEUS_ENABLED`: If set to `true` metrics are exposed to `<IP>:8000/metrics` (default: `false`)
