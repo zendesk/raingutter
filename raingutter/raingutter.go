@@ -286,6 +286,8 @@ func main() {
 	}
 	log.Info("RG_STATSD_NAMESPACE: ", statsdNamespace)
 
+	statsdExtraTags := os.Getenv("RG_STATSD_EXTRA_TAGS")
+
 	unicorn := os.Getenv("RG_UNICORN")
 	if unicorn == "" {
 		log.Warning("RG_UNICORN is not defined. Set to true by default")
@@ -358,6 +360,12 @@ func main() {
 	if project != "" {
 		tag := "project:" + project
 		statsdClient.Tags = append(statsdClient.Tags, tag)
+	}
+
+	// Add extra tags
+	if statsdExtraTags != "" {
+		tags := strings.Split(statsdExtraTags, ",")
+		statsdClient.Tags = append(statsdClient.Tags, tags...)
 	}
 
 	// Setup os signals catching
