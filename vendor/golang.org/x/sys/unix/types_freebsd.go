@@ -230,6 +230,7 @@ const (
 	SizeofSockaddrUnix     = C.sizeof_struct_sockaddr_un
 	SizeofSockaddrDatalink = C.sizeof_struct_sockaddr_dl
 	SizeofLinger           = C.sizeof_struct_linger
+	SizeofIovec            = C.sizeof_struct_iovec
 	SizeofIPMreq           = C.sizeof_struct_ip_mreq
 	SizeofIPMreqn          = C.sizeof_struct_ip_mreqn
 	SizeofIPv6Mreq         = C.sizeof_struct_ipv6_mreq
@@ -243,10 +244,54 @@ const (
 // Ptrace requests
 
 const (
-	PTRACE_TRACEME = C.PT_TRACE_ME
-	PTRACE_CONT    = C.PT_CONTINUE
-	PTRACE_KILL    = C.PT_KILL
+	PTRACE_ATTACH     = C.PT_ATTACH
+	PTRACE_CONT       = C.PT_CONTINUE
+	PTRACE_DETACH     = C.PT_DETACH
+	PTRACE_GETFPREGS  = C.PT_GETFPREGS
+	PTRACE_GETFSBASE  = C.PT_GETFSBASE
+	PTRACE_GETLWPLIST = C.PT_GETLWPLIST
+	PTRACE_GETNUMLWPS = C.PT_GETNUMLWPS
+	PTRACE_GETREGS    = C.PT_GETREGS
+	PTRACE_GETXSTATE  = C.PT_GETXSTATE
+	PTRACE_IO         = C.PT_IO
+	PTRACE_KILL       = C.PT_KILL
+	PTRACE_LWPEVENTS  = C.PT_LWP_EVENTS
+	PTRACE_LWPINFO    = C.PT_LWPINFO
+	PTRACE_SETFPREGS  = C.PT_SETFPREGS
+	PTRACE_SETREGS    = C.PT_SETREGS
+	PTRACE_SINGLESTEP = C.PT_STEP
+	PTRACE_TRACEME    = C.PT_TRACE_ME
 )
+
+const (
+	PIOD_READ_D  = C.PIOD_READ_D
+	PIOD_WRITE_D = C.PIOD_WRITE_D
+	PIOD_READ_I  = C.PIOD_READ_I
+	PIOD_WRITE_I = C.PIOD_WRITE_I
+)
+
+const (
+	PL_FLAG_BORN   = C.PL_FLAG_BORN
+	PL_FLAG_EXITED = C.PL_FLAG_EXITED
+	PL_FLAG_SI     = C.PL_FLAG_SI
+)
+
+const (
+	TRAP_BRKPT = C.TRAP_BRKPT
+	TRAP_TRACE = C.TRAP_TRACE
+)
+
+type PtraceLwpInfoStruct C.struct_ptrace_lwpinfo
+
+type __Siginfo C.struct___siginfo
+
+type Sigset_t C.sigset_t
+
+type Reg C.struct_reg
+
+type FpReg C.struct_fpreg
+
+type PtraceIoDesc C.struct_ptrace_io_desc
 
 // Events (kqueue, kevent)
 
@@ -354,3 +399,9 @@ type CapRights C.struct_cap_rights
 // Uname
 
 type Utsname C.struct_utsname
+
+// Clockinfo
+
+const SizeofClockinfo = C.sizeof_struct_clockinfo
+
+type Clockinfo C.struct_clockinfo
