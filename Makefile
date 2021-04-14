@@ -13,7 +13,7 @@ clean:
 
 build: clean
 	go test ./raingutter -v
-	GOOS=linux GOARCH=amd64 go build -ldflags="-X main.version=$(VERSION)" -a -o bin/raingutter raingutter/raingutter.go raingutter/socket_stats.go
+	GOOS=linux GOARCH=amd64 go build -ldflags="-X main.version=$(VERSION)" -a -mod=vendor -o bin/raingutter raingutter/raingutter.go raingutter/socket_stats.go
 
 systemd_pkg: build
 	fpm --input-type dir \
