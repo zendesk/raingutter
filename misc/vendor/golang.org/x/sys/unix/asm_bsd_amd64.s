@@ -2,11 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-<<<<<<< HEAD:vendor/golang.org/x/sys/unix/asm_darwin_amd64.s
-=======
 //go:build (darwin || dragonfly || freebsd || netbsd || openbsd) && gc
 // +build darwin dragonfly freebsd netbsd openbsd
->>>>>>> 22a3980 (Migrate to Go Modules and build from 1.16.3-alpine3.13):misc/vendor/golang.org/x/sys/unix/asm_bsd_amd64.s
 // +build gc
 
 #include "textflag.h"
