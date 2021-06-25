@@ -137,7 +137,7 @@ func Fetch(c http.Client, url string, s *status) *http.Response {
 	return response
 }
 
-// Parse convert a slice to float64
+// Parse converts a slice to float64
 func Parse(l string) float64 {
 	// get the value after the last ":"
 	splitted := strings.Split(l, ":")[len(strings.Split(l, ":"))-1]
@@ -176,7 +176,12 @@ func (r *raindrops) ScanSocketStats(s *SocketStats) raindrops {
 }
 
 // The histogram interface calculate the statistical distribution of any kind of value
-// and generates: 95percentile, max, median, avg, count
+// and generates:
+//	- 95percentile,
+//	- max,
+//  - median,
+//  - avg,
+//  - count
 // according to what's specified in /etc/dd-agent/datadog.conf
 //
 // https://docs.datadoghq.com/guides/dogstatsd/
