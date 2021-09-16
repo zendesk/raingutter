@@ -1,0 +1,62 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rg
+  namespace: unicorn-raindrops
+spec:
+  selector:
+    matchLabels:
+      app: rg
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: rg
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '8000'
+    spec:
+      containers:
+        - name: raingutter
+          image: zendesk/raingutter
+          env:
+            - name: RG_UNICORN_PORT
+              value: '3000'
+            - name: RG_USE_SOCKET_STATS
+              value: 'false'
+            - name: RG_RAINDROPS_URL
+              value: 'http://127.0.0.1:3000/_raindrops'
+            - name: RG_FREQUENCY
+              value: '1000'
+            - name: RG_STATSD_NAMESPACE
+              value: 'raingutter.unicorn-raindrops.dev.'
+            - name: UNICORN_WORKERS
+              value: '16'
+            - name: RG_STATSD_HOST
+              value: '127.0.0.1'
+            - name: RG_STATSD_PORT
+              value: '8125'
+            - name: POD_NAME
+              value: 'myapp-app-server'
+            - name: POD_NAMESPACE
+              value: 'pod161'
+            - name: PROJECT
+              value: 'my-project'
+            - name: RG_PROMETHEUS_ENABLED
+              value: 'true'
+            - name: RG_UNICORN
+              value: 'true'
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+          imagePullPolicy: IfNotPresent
+        - name: mock-dogstatsd
+          image: zendesk/mock-dogstatsd
+          imagePullPolicy: IfNotPresent
+        - name: mock-raindrops
+          image: zendesk/mock-raindrops
+          imagePullPolicy: IfNotPresent
+      terminationGracePeriodSeconds: 1
+      restartPolicy: Always
+      dnsPolicy: ClusterFirst

@@ -86,8 +86,8 @@ func GetWorkers(w *workers) {
 		err     error
 	)
 	unicornWorkers := os.Getenv("UNICORN_WORKERS")
-	// If the UNICORN_WORKERS env var is empty
-	// get unicorn workers count via pgrep
+	// If the UNICORN_WORKERS env var is empty fallback on pgrep
+	// This is meant to be used on VM or bare metal
 	if unicornWorkers == "" {
 		binary, lookErr := exec.LookPath("pgrep")
 		checkFatal(lookErr)
@@ -177,8 +177,8 @@ func (r *raindrops) ScanSocketStats(s *SocketStats) raindrops {
 
 // The histogram interface calculate the statistical distribution of any kind of value
 // and generates:
-//	- 95percentile,
-//	- max,
+//  - 95percentile,
+//  - max,
 //  - median,
 //  - avg,
 //  - count
@@ -211,6 +211,7 @@ func (r *raindrops) SendStats(c *statsd.Client, w *workers) {
 }
 
 func (r *raindrops) recordMetrics(w *workers) {
+	// TODO add a conditional here, and provide different metrics if we use puma or unicorn
 	raindropsActive.WithLabelValues(podName, project, podNameSpace).Observe(r.Active)
 	raindropsQueued.WithLabelValues(podName, project, podNameSpace).Observe(r.Queued)
 	raindropsWorkers.WithLabelValues(podName, project, podNameSpace).Set(w.Count)
@@ -287,6 +288,7 @@ func main() {
 
 	statsdNamespace := os.Getenv("RG_STATSD_NAMESPACE")
 	if statsdNamespace == "" {
+		log.Warning("RG_STATSD_NAMESPACE is not defined. Using 'unicorn.raingutter.agg.'")
 		statsdNamespace = "unicorn.raingutter.agg."
 	}
 	log.Info("RG_STATSD_NAMESPACE: ", statsdNamespace)
@@ -295,15 +297,15 @@ func main() {
 
 	unicorn := os.Getenv("RG_UNICORN")
 	if unicorn == "" {
-		log.Warning("RG_UNICORN is not defined. Set to true by default")
-		unicorn = "true"
+		log.Warning("RG_UNICORN is not defined. Set to false by default")
+		unicorn = "false"
 	}
 	log.Info("RG_UNICORN: ", unicorn)
 
 	usingSocketStats := os.Getenv("RG_USE_SOCKET_STATS")
 	if usingSocketStats == "" {
-		log.Warning("RG_USE_SOCKET_STATS is not defined. Set to false by default")
-		usingSocketStats = "false"
+		log.Warning("RG_USE_SOCKET_STATS is not defined. Set to true by default")
+		usingSocketStats = "true"
 	}
 	log.Info("RG_USE_SOCKET_STATS: ", usingSocketStats)
 
@@ -397,6 +399,7 @@ func main() {
 		didScan := false
 
 		time.Sleep(time.Millisecond * time.Duration(freqInt))
+		// using SocketStats is the recommended method
 		if usingSocketStats == "true" {
 			rawStats, err := GetSocketStats()
 			if err != nil {
@@ -411,6 +414,8 @@ func main() {
 				didScan = true
 			}
 		} else {
+			// if SocketStats is disabled, raingutter will use the raindrops endpoint
+			// to retrieve metrics from the unicorn master
 			body := Fetch(httpClient, raindropsURL, &readiness)
 			if body != nil {
 				r.Scan(body)
