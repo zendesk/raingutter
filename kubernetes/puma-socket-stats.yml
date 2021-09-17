@@ -34,11 +34,13 @@ spec:
             - name: POD_NAME
               value: 'myapp-app-server'
             - name: POD_NAMESPACE
-              value: 'socket-stats'
+              value: 'puma-socket-stats'
             - name: PROJECT
               value: 'my-project'
             - name: RG_PROMETHEUS_ENABLED
               value: 'true'
+            - name: RG_FREQUENCY
+              value: '5000'
           securityContext:
             runAsNonRoot: true
             readOnlyRootFilesystem: true

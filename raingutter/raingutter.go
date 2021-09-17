@@ -14,41 +14,15 @@ import (
 	"time"
 
 	"github.com/DataDog/datadog-go/statsd"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 )
 
 var (
-	execCommand     = exec.Command
-	version         string
-	podName         = os.Getenv("POD_NAME")
-	podNameSpace    = os.Getenv("POD_NAMESPACE")
-	project         = os.Getenv("PROJECT")
-	raindropsActive = promauto.NewSummaryVec(
-		prometheus.SummaryOpts{
-			Namespace:  "unicorn",
-			Subsystem:  "raindrops",
-			Name:       "active",
-			Objectives: map[float64]float64{0.0: 0.00, 0.1: 0.01, 0.5: 0.05, 0.95: 0.001, 0.99: 0.001, 1: 1},
-		},
-		[]string{"pod_name", "project", "pod_namespace"})
-	raindropsQueued = promauto.NewSummaryVec(
-		prometheus.SummaryOpts{
-			Namespace:  "unicorn",
-			Subsystem:  "raindrops",
-			Name:       "queued",
-			Objectives: map[float64]float64{0.0: 0.00, 0.1: 0.01, 0.5: 0.05, 0.95: 0.001, 0.99: 0.001, 1: 1},
-		},
-		[]string{"pod_name", "project", "pod_namespace"})
-	raindropsWorkers = promauto.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "unicorn",
-			Subsystem: "raindrops",
-			Name:      "worker",
-		},
-		[]string{"pod_name", "project", "pod_namespace"})
+	execCommand  = exec.Command
+	version      string
+	podName      = os.Getenv("POD_NAME")
+	podNameSpace = os.Getenv("POD_NAMESPACE")
+	project      = os.Getenv("PROJECT")
 )
 
 type raindrops struct {
@@ -210,13 +184,6 @@ func (r *raindrops) SendStats(c *statsd.Client, w *workers) {
 	checkError(err)
 }
 
-func (r *raindrops) recordMetrics(w *workers) {
-	// TODO add a conditional here, and provide different metrics if we use puma or unicorn
-	raindropsActive.WithLabelValues(podName, project, podNameSpace).Observe(r.Active)
-	raindropsQueued.WithLabelValues(podName, project, podNameSpace).Observe(r.Queued)
-	raindropsWorkers.WithLabelValues(podName, project, podNameSpace).Set(w.Count)
-}
-
 func (r *raindrops) logMetrics(w *workers, raindropsURL string) {
 	contextLogger := log.WithFields(log.Fields{
 		"active":  r.Active,
@@ -258,14 +225,7 @@ func main() {
 		log.Warning("RG_PROMETHEUS_ENABLED is not defined. Set to false by default")
 		prometheusEnabled = "false"
 	} else if prometheusEnabled == "true" {
-		go func() {
-			for {
-				http.Handle("/metrics", promhttp.Handler())
-				if err := http.ListenAndServe(":8000", nil); err != nil {
-					log.Fatal(err)
-				}
-			}
-		}()
+		setupPrometheus()
 	}
 
 	raindropsURL := os.Getenv("RG_RAINDROPS_URL")
