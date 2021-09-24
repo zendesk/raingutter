@@ -10,36 +10,42 @@ import (
 )
 
 var (
-	raindropsActive = promauto.NewSummaryVec(
+	raingutterActive = promauto.NewSummaryVec(
 		prometheus.SummaryOpts{
-			Namespace:  "unicorn",
-			Subsystem:  "raindrops",
+			Namespace:  "raingutter",
 			Name:       "active",
 			Objectives: map[float64]float64{0.0: 0.00, 0.1: 0.01, 0.5: 0.05, 0.95: 0.001, 0.99: 0.001, 1: 1},
 		},
 		[]string{"pod_name", "project", "pod_namespace"})
-	raindropsQueued = promauto.NewSummaryVec(
+	raingutterQueued = promauto.NewSummaryVec(
 		prometheus.SummaryOpts{
-			Namespace:  "unicorn",
-			Subsystem:  "raindrops",
+			Namespace:  "raingutter",
 			Name:       "queued",
 			Objectives: map[float64]float64{0.0: 0.00, 0.1: 0.01, 0.5: 0.05, 0.95: 0.001, 0.99: 0.001, 1: 1},
 		},
 		[]string{"pod_name", "project", "pod_namespace"})
-	raindropsWorkers = promauto.NewGaugeVec(
+	raingutterWorkers = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "unicorn",
-			Subsystem: "raindrops",
+			Namespace: "raingutter",
 			Name:      "worker",
+		},
+		[]string{"pod_name", "project", "pod_namespace"})
+	raingutterThreads = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "raingutter",
+			Name:      "threads",
 		},
 		[]string{"pod_name", "project", "pod_namespace"})
 )
 
-func (r *raindrops) recordMetrics(w *workers) {
-	// TODO add a conditional here, and provide different metrics if we use puma or unicorn
-	raindropsActive.WithLabelValues(podName, project, podNameSpace).Observe(r.Active)
-	raindropsQueued.WithLabelValues(podName, project, podNameSpace).Observe(r.Queued)
-	raindropsWorkers.WithLabelValues(podName, project, podNameSpace).Set(w.Count)
+func (r *raingutter) recordMetrics(tc *totalConnections, useThreads string) {
+	raingutterActive.WithLabelValues(podName, project, podNameSpace).Observe(r.Active)
+	raingutterQueued.WithLabelValues(podName, project, podNameSpace).Observe(r.Queued)
+	if useThreads == "true" {
+		raingutterThreads.WithLabelValues(podName, project, podNameSpace).Set(tc.Count)
+	} else {
+		raingutterWorkers.WithLabelValues(podName, project, podNameSpace).Set(tc.Count)
+	}
 }
 
 func setupPrometheus() {

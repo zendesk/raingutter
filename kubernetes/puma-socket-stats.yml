@@ -23,9 +23,13 @@ spec:
           env:
             - name: RG_USE_SOCKET_STATS  # default
               value: 'true'
+            - name: RG_SERVER_PORT
+              value: '3000'
             - name: RG_STATSD_NAMESPACE
               value: 'raingutter.socket-status.dev.'
-            - name: UNICORN_WORKERS
+            - name: RG_THREADS
+              value: 'true'
+            - name: MAX_THREADS
               value: '16'
             - name: RG_STATSD_HOST
               value: '127.0.0.1'

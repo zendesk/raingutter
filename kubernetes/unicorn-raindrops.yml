@@ -27,8 +27,6 @@ spec:
               value: 'false'
             - name: RG_RAINDROPS_URL
               value: 'http://127.0.0.1:3000/_raindrops'
-            - name: RG_FREQUENCY
-              value: '1000'
             - name: RG_STATSD_NAMESPACE
               value: 'raingutter.unicorn-raindrops.dev.'
             - name: UNICORN_WORKERS
@@ -44,8 +42,6 @@ spec:
             - name: PROJECT
               value: 'my-project'
             - name: RG_PROMETHEUS_ENABLED
-              value: 'true'
-            - name: RG_UNICORN
               value: 'true'
             - name: RG_FREQUENCY
               value: '5000'

@@ -25,7 +25,7 @@ var (
 	project      = os.Getenv("PROJECT")
 )
 
-type raindrops struct {
+type raingutter struct {
 	Calling float64
 	Writing float64
 	Active  float64
@@ -36,7 +36,7 @@ type status struct {
 	Ready bool
 }
 
-type workers struct {
+type totalConnections struct {
 	Count float64
 }
 
@@ -52,8 +52,20 @@ func checkFatal(err error) {
 	}
 }
 
-// GetWorkers return the total number of unicorn workers
-func GetWorkers(w *workers) {
+func getThreads(tc *totalConnections) {
+	var (
+		threads float64
+	)
+	maxThreads := os.Getenv("MAX_THREADS")
+	if maxThreads == "" {
+		log.Fatal("MAX_THREADS is not defined.")
+	}
+	threads, err := strconv.ParseFloat(maxThreads, 64)
+	checkFatal(err)
+	tc.Count = threads
+}
+
+func getWorkers(tc *totalConnections) {
 	var (
 		workers float64
 		cmdOut  []byte
@@ -70,18 +82,18 @@ func GetWorkers(w *workers) {
 			log.Error(binary, " returned: ", err)
 			workers = 0
 			log.Warn("Unicorn workers count set to 0")
-			w.Count = workers
+			tc.Count = workers
 		} else {
 			out := string(cmdOut)
 			unicorns, err := strconv.ParseFloat(strings.TrimSpace(out), 64)
 			checkFatal(err)
 			// remove the master from the total running unicorns
-			w.Count = unicorns - 1
+			tc.Count = unicorns - 1
 		}
 	} else {
 		workers, err := strconv.ParseFloat(unicornWorkers, 64)
 		checkFatal(err)
-		w.Count = workers
+		tc.Count = workers
 	}
 }
 
@@ -121,7 +133,7 @@ func Parse(l string) float64 {
 	return value
 }
 
-func (r *raindrops) Scan(response *http.Response) raindrops {
+func (r *raingutter) Scan(response *http.Response) raingutter {
 	scanner := bufio.NewScanner(response.Body)
 	defer response.Body.Close()
 	for scanner.Scan() {
@@ -142,24 +154,25 @@ func (r *raindrops) Scan(response *http.Response) raindrops {
 	return *r
 }
 
-func (r *raindrops) ScanSocketStats(s *SocketStats) raindrops {
+func (r *raingutter) ScanSocketStats(s *SocketStats) raingutter {
 	// `writing` and `calling` are not yet implemented
 	r.Active = s.ActiveWorkers
 	r.Queued = s.QueueSize
 	return *r
 }
 
-// The histogram interface calculate the statistical distribution of any kind of value
-// and generates:
+// The histogram interface calculates the statistical distribution of any kind of value
+// and it generates:
 //  - 95percentile,
 //  - max,
 //  - median,
 //  - avg,
 //  - count
+//
 // according to what's specified in /etc/dd-agent/datadog.conf
 //
 // https://docs.datadoghq.com/guides/dogstatsd/
-func (r *raindrops) SendStats(c *statsd.Client, w *workers) {
+func (r *raingutter) sendStats(c *statsd.Client, tc *totalConnections, useThreads string) {
 	// calling: int
 	// writing: int
 	//
@@ -179,18 +192,24 @@ func (r *raindrops) SendStats(c *statsd.Client, w *workers) {
 	// active - total number of active clients on that listener
 	err = c.Histogram("active", r.Active, nil, 1)
 	checkError(err)
-	// worker.count - total number of available unicorn workers
-	err = c.Histogram("worker.count", w.Count, nil, 1)
-	checkError(err)
+	if useThreads == "true" {
+		// threads.count - total number of allowed threads
+		err = c.Histogram("threads.count", tc.Count, nil, 1)
+		checkError(err)
+	} else {
+		// worker.count - total number of provisioned workers
+		err = c.Histogram("worker.count", tc.Count, nil, 1)
+		checkError(err)
+	}
 }
 
-func (r *raindrops) logMetrics(w *workers, raindropsURL string) {
+func (r *raingutter) logMetrics(tc *totalConnections, raindropsURL string) {
 	contextLogger := log.WithFields(log.Fields{
 		"active":  r.Active,
 		"queued":  r.Queued,
 		"writing": r.Writing,
 		"calling": r.Calling,
-		"workers": w.Count,
+		"workers": tc.Count,
 	})
 	contextLogger.Info(raindropsURL)
 }
@@ -207,6 +226,20 @@ func main() {
 		fmt.Println("v" + version)
 		os.Exit(0)
 	}
+
+	useThreads := os.Getenv("RG_THREADS")
+	if useThreads == "" {
+		log.Warning("RG_THREADS is not defined. Set to false by default")
+		useThreads = "false"
+	}
+	log.Info("RG_THREADS: ", useThreads)
+
+	useSocketStats := os.Getenv("RG_USE_SOCKET_STATS")
+	if useSocketStats == "" {
+		log.Warning("RG_USE_SOCKET_STATS is not defined. Set to true by default")
+		useSocketStats = "true"
+	}
+	log.Info("RG_USE_SOCKET_STATS: ", useSocketStats)
 
 	statsdEnabled := os.Getenv("RG_STATSD_ENABLED")
 	if statsdEnabled == "" {
@@ -230,9 +263,12 @@ func main() {
 
 	raindropsURL := os.Getenv("RG_RAINDROPS_URL")
 	if raindropsURL == "" {
-		log.Warning("RG_RAINDROPS_URL is missing")
+		if useThreads == "false" && useSocketStats == "false" {
+			log.Fatal("RG_RAINDROPS_URL is missing")
+		}
+	} else {
+		log.Info("RG_RAINDROPS_URL: ", raindropsURL)
 	}
-	log.Info("RG_RAINDROPS_URL: ", raindropsURL)
 
 	statsdHost := os.Getenv("RG_STATSD_HOST")
 	if statsdHost == "" {
@@ -255,27 +291,15 @@ func main() {
 
 	statsdExtraTags := os.Getenv("RG_STATSD_EXTRA_TAGS")
 
-	unicorn := os.Getenv("RG_UNICORN")
-	if unicorn == "" {
-		log.Warning("RG_UNICORN is not defined. Set to false by default")
-		unicorn = "false"
+	serverPort := os.Getenv("RG_SERVER_PORT")
+	if serverPort == "" {
+		serverPort = "3000"
+		log.Warning("RG_SERVER_PORT is not defined. Set to 3000 by default")
+	} else {
+		log.Info("RG_SERVER_PORT: ", serverPort)
 	}
-	log.Info("RG_UNICORN: ", unicorn)
 
-	usingSocketStats := os.Getenv("RG_USE_SOCKET_STATS")
-	if usingSocketStats == "" {
-		log.Warning("RG_USE_SOCKET_STATS is not defined. Set to true by default")
-		usingSocketStats = "true"
-	}
-	log.Info("RG_USE_SOCKET_STATS: ", usingSocketStats)
-
-	unicornPort := os.Getenv("RG_UNICORN_PORT")
-	if unicornPort == "" {
-		unicornPort = "3000"
-	}
-	log.Info("RG_UNICORN_PORT: ", unicornPort)
-
-	// Milliseconds
+	// raingutter polling frequency expressed in ms
 	frequency := os.Getenv("RG_FREQUENCY")
 	if frequency == "" {
 		frequency = "500"
@@ -295,7 +319,7 @@ func main() {
 		log.Warn("PROJECT is missing")
 	}
 
-	r := raindrops{}
+	r := raingutter{}
 
 	// Create an http client
 	timeout := time.Duration(3 * time.Second)
@@ -343,11 +367,14 @@ func main() {
 		log.Fatal("Received signal: ", s)
 	}()
 
-	w := workers{Count: 0}
-	if unicorn == "true" {
+	tc := totalConnections{Count: 0}
+	if useThreads == "true" {
+		getThreads(&tc)
+
+	} else {
 		go func() {
 			for {
-				GetWorkers(&w)
+				getWorkers(&tc)
 				// sleep for a minute
 				<-time.After(60 * time.Second)
 			}
@@ -360,13 +387,13 @@ func main() {
 
 		time.Sleep(time.Millisecond * time.Duration(freqInt))
 		// using SocketStats is the recommended method
-		if usingSocketStats == "true" {
+		if useSocketStats == "true" {
 			rawStats, err := GetSocketStats()
 			if err != nil {
 				log.Error(err)
 			}
 
-			stats, err := ParseSocketStats(unicornPort, rawStats)
+			stats, err := ParseSocketStats(serverPort, rawStats)
 			if err != nil {
 				log.Error(err)
 			} else {
@@ -385,13 +412,13 @@ func main() {
 
 		if didScan {
 			if statsdEnabled == "true" {
-				r.SendStats(statsdClient, &w)
+				r.sendStats(statsdClient, &tc, useThreads)
 			}
 			if prometheusEnabled == "true" {
-				r.recordMetrics(&w)
+				r.recordMetrics(&tc, useThreads)
 			}
 			if logMetricsEnabled == "true" {
-				r.logMetrics(&w, raindropsURL)
+				r.logMetrics(&tc, raindropsURL)
 			}
 		}
 	}
