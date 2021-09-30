@@ -65,7 +65,7 @@ func TestScan(t *testing.T) {
 		}
 		s := status{Ready: true}
 		res := Fetch(httpClient, ts.URL, &s)
-		r := raindrops{}
+		r := raingutter{}
 		r.Scan(res)
 		switch {
 		case r.Calling != 1:
@@ -100,14 +100,14 @@ func fakeExecCommand(command string, args ...string) *exec.Cmd {
 func TestUnicornWorkersPgrep(t *testing.T) {
 	execCommand = fakeExecCommand
 	defer func() { execCommand = exec.Command }()
-	w := workers{Count: 0}
-	GetWorkers(&w)
+	tc := totalConnections{Count: 0}
+	getWorkers(&tc)
 	result, err := strconv.ParseFloat(commandResult, 64)
 	if err != nil {
 		t.Errorf("%v", err)
 	}
-	if w.Count != result-1 {
-		t.Errorf("Unicorn workers is: %v. It should be %v", w.Count, result-1)
+	if tc.Count != result-1 {
+		t.Errorf("Unicorn workers is: %v. It should be %v", tc.Count, result-1)
 	}
 }
 
@@ -121,19 +121,19 @@ func TestHelperProcess(t *testing.T) {
 }
 
 func TestUnicornWorkerPgrepError(t *testing.T) {
-	w := workers{Count: 0}
-	GetWorkers(&w)
-	if w.Count != 0 {
-		t.Errorf("Unicorn workers is: %v. It should be 0", w.Count)
+	tc := totalConnections{Count: 0}
+	getWorkers(&tc)
+	if tc.Count != 0 {
+		t.Errorf("Unicorn workers is: %v. It should be 0", tc.Count)
 	}
 
 }
 
 func TestUnicornWorkerEnv(t *testing.T) {
 	os.Setenv("UNICORN_WORKERS", "16")
-	w := workers{Count: 0}
-	GetWorkers(&w)
-	if w.Count != 16 {
-		t.Errorf("Unicorn workers is: %v. It should be 16", w.Count)
+	tc := totalConnections{Count: 0}
+	getWorkers(&tc)
+	if tc.Count != 16 {
+		t.Errorf("Unicorn workers is: %v. It should be 16", tc.Count)
 	}
 }

@@ -7,6 +7,7 @@ DEBIAN_URL := "https://github.com/zendesk/raingutter"
 DEBIAN_NAME := "raingutter"
 DEBIAN_ARCH := "amd64"
 DEBIAN_VENDOR := "Zendesk"
+NAMESPACES := "unicorn-raindrops" "unicorn-socket-stats" "puma-socket-stats"
 
 clean:
 	rm -f *.deb *.dsc *.tar.gz *.changes bin/raingutter
@@ -44,3 +45,6 @@ runit_pkg: build
 		--verbose \
 		./bin=/usr/
 	dpkg -I raingutter*.deb
+
+setup-skaffold:
+	$(foreach var,$(NAMESPACES),kubectl create namespace $(var);)

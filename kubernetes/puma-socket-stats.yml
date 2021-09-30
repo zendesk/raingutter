@@ -2,7 +2,8 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: rg-deployment
+  name: rg
+  namespace: puma-socket-stats
 spec:
   selector:
     matchLabels:
@@ -20,17 +21,15 @@ spec:
         - name: raingutter
           image: zendesk/raingutter
           env:
-            - name: RG_UNICORN_PORT
+            - name: RG_USE_SOCKET_STATS  # default
+              value: 'true'
+            - name: RG_SERVER_PORT
               value: '3000'
-            - name: RG_USE_SOCKET_STATS
-              value: 'false'
-            - name: RG_RAINDROPS_URL
-              value: 'http://127.0.0.1:3000/_raindrops'
-            - name: RG_FREQUENCY
-              value: '1000'
             - name: RG_STATSD_NAMESPACE
-              value: 'raingutter.dev.'
-            - name: UNICORN_WORKERS
+              value: 'raingutter.socket-status.dev.'
+            - name: RG_THREADS
+              value: 'true'
+            - name: MAX_THREADS
               value: '16'
             - name: RG_STATSD_HOST
               value: '127.0.0.1'
@@ -39,22 +38,19 @@ spec:
             - name: POD_NAME
               value: 'myapp-app-server'
             - name: POD_NAMESPACE
-              value: 'pod161'
+              value: 'puma-socket-stats'
             - name: PROJECT
               value: 'my-project'
             - name: RG_PROMETHEUS_ENABLED
               value: 'true'
-            - name: RG_UNICORN
-              value: 'true'
+            - name: RG_FREQUENCY
+              value: '5000'
           securityContext:
             runAsNonRoot: true
             readOnlyRootFilesystem: true
           imagePullPolicy: IfNotPresent
         - name: mock-dogstatsd
           image: zendesk/mock-dogstatsd
-          imagePullPolicy: IfNotPresent
-        - name: mock-raindrops
-          image: zendesk/mock-raindrops
           imagePullPolicy: IfNotPresent
       terminationGracePeriodSeconds: 1
       restartPolicy: Always

@@ -101,8 +101,8 @@ func ParseSocket(s string) (Socket, error) {
 // TODO: investigate porting the Raindrops C implementation, which uses netlink for
 // a significantly more performant socket check
 // https://github.com/tmm1/raindrops/blob/1c18fd9c13f95fef6bcbdc0587d38886fa8e9064/ext/raindrops/linux_inet_diag.c#L295
-func ParseSocketStats(unicornPort string, ssOutput string) (*SocketStats, error) {
-	port, err := strconv.Atoi(unicornPort)
+func ParseSocketStats(serverPort string, ssOutput string) (*SocketStats, error) {
+	port, err := strconv.Atoi(serverPort)
 	if err != nil {
 		return nil, err
 	}
