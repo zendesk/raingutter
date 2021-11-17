@@ -15,9 +15,10 @@ Other solutions exists, but they all have their caveats:
 
 ## Design
 
-Raingutter currently supports two methods of collecting TCP connections metrics:
+Raingutter currently supports three methods of collecting TCP connections metrics:
 
-* Built in socket monitoring (based on `/proc/net/tcp`): information about active TCP connections are retrieved from the OS, no external dependencies required (recommended).
+* Built in socket monitoring based on `NETLINK_SOCK_DIAG`: information about active TCP connections are retrieved from the OS, no external dependencies required (recommended).
+* Built in socket monitoring based on `/proc/net/tcp`: can generate the same information as netlink, but slower due to the added string processing required.
 * [Raindrops gem](https://bogomips.org/raindrops/) a real-time stats toolkit to show unicorn statistics
 
 Multi-threaded web server like `Puma` can be also monitored by `Raingutter` with the built in socket monitoring.
@@ -33,7 +34,11 @@ More information about how to build a `deb` package can be found in the build se
 
 The following environment variables can be used to configure Raingutter:
 
-* `RG_USE_SOCKET_STATS`: Enables or disables the built in socket monitoring (default: `true`)
+* `RG_SOCKET_STATS_MODE`: How socket stats will be collected. Set to one of:
+    * `netlink` - reads stats from a `NETLINK_SOCK_DIAG` netlink socket (default)
+    * `proc_net` - parse the stats from the string data in `/proc/net/tcp`
+    * `raindrops` - parse stats from the raindrops URL (must set `RG_RAINDROPS_URL`)
+* `RG_USE_SOCKET_STATS`: Deprecated - use `RG_SOCKET_STATS_MODE` instead. If set to `true`, will behave like `RG_SOCKET_STATS_MODE == "proc_net"`, and if set to `false` will behave like `RG_SOCKET_STATS_MODE == "raindrops"`.
 * `RG_FREQUENCY`: Polling frequency in milliseconds (default: `500`)
 * `RG_SERVER_PORT`: Where the web server listens to
 

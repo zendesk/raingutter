@@ -231,12 +231,24 @@ func main() {
 	}
 	log.Info("RG_THREADS: ", useThreads)
 
-	useSocketStats := os.Getenv("RG_USE_SOCKET_STATS")
-	if useSocketStats == "" {
-		log.Warning("RG_USE_SOCKET_STATS is not defined. Set to true by default")
-		useSocketStats = "true"
+	// Whether to use /proc/net/tcp or netlink or raindrops to get socket stats
+	socketStatsMode := os.Getenv("RG_SOCKET_STATS_MODE")
+	if socketStatsMode == "" {
+		useSocketStats := os.Getenv("RG_USE_SOCKET_STATS")
+		if useSocketStats != "" {
+			log.Warning("RG_USE_SOCKET_STATS is deprecated; set RG_SOCKET_STATS_MODE to obtain the same effect")
+			if strings.ToLower(useSocketStats) == "true" {
+				socketStatsMode = "proc_net"
+			} else {
+				socketStatsMode = "raindrops"
+			}
+		}
+		socketStatsMode = "netlink"
 	}
-	log.Info("RG_USE_SOCKET_STATS: ", useSocketStats)
+	if socketStatsMode != "netlink" && socketStatsMode != "proc_net" && socketStatsMode != "raindrops" {
+		log.Fatalf("Invalid value for RG_NET_POLL_MODE %s (should be netlink, proc_net, or raindrops)", socketStatsMode)
+	}
+	log.Info("RG_SOCKET_STATS_MODE: ", socketStatsMode)
 
 	statsdEnabled := os.Getenv("RG_STATSD_ENABLED")
 	if statsdEnabled == "" {
@@ -260,7 +272,7 @@ func main() {
 
 	raindropsURL := os.Getenv("RG_RAINDROPS_URL")
 	if raindropsURL == "" {
-		if useThreads == "false" && useSocketStats == "false" {
+		if useThreads == "false" && socketStatsMode == "raindrops" {
 			log.Fatal("RG_RAINDROPS_URL is missing")
 		}
 	} else {
@@ -295,6 +307,11 @@ func main() {
 	} else {
 		log.Info("RG_SERVER_PORT: ", serverPort)
 	}
+	serverPortInt, err := strconv.Atoi(serverPort)
+	if err != nil {
+		log.Fatalf("Could not parse RG_SERVER_PORT %s: %s", serverPort, err)
+	}
+	serverPortShort := uint16(serverPortInt)
 
 	// raingutter polling frequency expressed in ms
 	frequency := os.Getenv("RG_FREQUENCY")
@@ -378,13 +395,23 @@ func main() {
 		}()
 	}
 
+	var rnlc *RaingutterNetlinkConnection
+	if socketStatsMode == "netlink" {
+		rnlc, err = NewRaingutterNetlinkConnection()
+		if err != nil {
+			log.Fatal("error creating netlink connection: ", err)
+		}
+		defer rnlc.Close()
+	}
+
 	readiness := status{Ready: false}
 	for {
 		didScan := false
 
 		time.Sleep(time.Millisecond * time.Duration(freqInt))
-		// using SocketStats is the recommended method
-		if useSocketStats == "true" {
+
+		switch socketStatsMode {
+		case "proc_net":
 			rawStats, err := GetSocketStats()
 			if err != nil {
 				log.Error(err)
@@ -397,12 +424,20 @@ func main() {
 				r.ScanSocketStats(stats)
 				didScan = true
 			}
-		} else {
+		case "raindrops":
 			// if SocketStats is disabled, raingutter will use the raindrops endpoint
 			// to retrieve metrics from the unicorn master
 			body := Fetch(httpClient, raindropsURL, &readiness)
 			if body != nil {
 				r.Scan(body)
+				didScan = true
+			}
+		case "netlink":
+			stats, err := rnlc.ReadStats(serverPortShort)
+			if err != nil {
+				log.Error(err)
+			} else {
+				r.ScanSocketStats(&stats)
 				didScan = true
 			}
 		}
