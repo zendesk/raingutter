@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: raingutter
-          image: zendesk/raingutter
+          image: raingutter
           env:
             - name: RG_UNICORN_PORT
               value: '3000'
@@ -50,10 +50,10 @@ spec:
             readOnlyRootFilesystem: true
           imagePullPolicy: IfNotPresent
         - name: mock-dogstatsd
-          image: zendesk/mock-dogstatsd
+          image: mock-dogstatsd
           imagePullPolicy: IfNotPresent
         - name: mock-raindrops
-          image: zendesk/mock-raindrops
+          image: mock-raindrops
           imagePullPolicy: IfNotPresent
       terminationGracePeriodSeconds: 1
       restartPolicy: Always
