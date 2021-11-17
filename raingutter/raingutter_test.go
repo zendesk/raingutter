@@ -28,7 +28,7 @@ writing: 2
 
 var Lines = []struct {
 	n        string
-	expected float64
+	expected uint64
 }{
 	{"calling: 1", 1},
 	{"127.0.0.1:3000 queued: 4", 4},
@@ -102,7 +102,7 @@ func TestUnicornWorkersPgrep(t *testing.T) {
 	defer func() { execCommand = exec.Command }()
 	tc := totalConnections{Count: 0}
 	getWorkers(&tc)
-	result, err := strconv.ParseFloat(commandResult, 64)
+	result, err := strconv.ParseUint(commandResult, 10, 64)
 	if err != nil {
 		t.Errorf("%v", err)
 	}

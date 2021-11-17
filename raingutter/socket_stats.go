@@ -12,15 +12,15 @@ import (
 )
 
 type SocketStats struct {
-	QueueSize     float64
-	ActiveWorkers float64
+	QueueSize     uint64
+	ActiveWorkers uint64
 }
 
 type Socket struct {
 	LocalPort int64
 	ConnState string
 	Inode     string
-	QueueSize float64
+	QueueSize uint64
 }
 
 // strip out the `sl local_address remote_address...` menu and trailing whitespace
@@ -94,7 +94,7 @@ func ParseSocket(s string) (Socket, error) {
 		return Socket{}, err
 	}
 
-	return Socket{localPort, connState, inode, float64(queueSize)}, nil
+	return Socket{localPort, connState, inode, uint64(queueSize)}, nil
 
 }
 
@@ -107,8 +107,9 @@ func ParseSocketStats(serverPort string, ssOutput string) (*SocketStats, error) 
 		return nil, err
 	}
 
-	var queueSize float64
-	var activeWorkers float64
+	var queueSize uint64
+	var activeWorkers uint64
+	var listenerInode uint32
 
 	sockets := strings.Split(ssOutput, "\n")
 	for _, s := range sockets {

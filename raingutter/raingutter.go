@@ -26,10 +26,10 @@ var (
 )
 
 type raingutter struct {
-	Calling float64
-	Writing float64
-	Active  float64
-	Queued  float64
+	Calling uint64
+	Writing uint64
+	Active  uint64
+	Queued  uint64
 }
 
 type status struct {
@@ -37,7 +37,7 @@ type status struct {
 }
 
 type totalConnections struct {
-	Count float64
+	Count uint64
 }
 
 func checkError(err error) {
@@ -53,21 +53,18 @@ func checkFatal(err error) {
 }
 
 func getThreads(tc *totalConnections) {
-	var (
-		threads float64
-	)
 	maxThreads := os.Getenv("MAX_THREADS")
 	if maxThreads == "" {
 		log.Fatal("MAX_THREADS is not defined.")
 	}
-	threads, err := strconv.ParseFloat(maxThreads, 64)
+	threads, err := strconv.ParseUint(maxThreads, 10, 64)
 	checkFatal(err)
 	tc.Count = threads
 }
 
 func getWorkers(tc *totalConnections) {
 	var (
-		workers float64
+		workers uint64
 		cmdOut  []byte
 		err     error
 	)
@@ -85,15 +82,15 @@ func getWorkers(tc *totalConnections) {
 			tc.Count = workers
 		} else {
 			out := string(cmdOut)
-			unicorns, err := strconv.ParseFloat(strings.TrimSpace(out), 64)
+			unicorns, err := strconv.ParseUint(strings.TrimSpace(out), 10, 64)
 			checkFatal(err)
 			// remove the master from the total running unicorns
 			tc.Count = unicorns - 1
 		}
 	} else {
-		workers, err := strconv.ParseFloat(unicornWorkers, 64)
+		workers, err := strconv.ParseUint(unicornWorkers, 10, 64)
 		checkFatal(err)
-		tc.Count = workers
+		tc.Count = uint64(workers)
 	}
 }
 
@@ -124,11 +121,11 @@ func Fetch(c http.Client, url string, s *status) *http.Response {
 }
 
 // Parse converts a slice to float64
-func Parse(l string) float64 {
+func Parse(l string) uint64 {
 	// get the value after the last ":"
 	splitted := strings.Split(l, ":")[len(strings.Split(l, ":"))-1]
 	// trim space and parse the int
-	value, err := strconv.ParseFloat(strings.TrimSpace(splitted), 64)
+	value, err := strconv.ParseUint(strings.TrimSpace(splitted), 10, 64)
 	checkFatal(err)
 	return value
 }
@@ -181,24 +178,24 @@ func (r *raingutter) sendStats(c *statsd.Client, tc *totalConnections, useThread
 	// <UNIX or TCP SOCKET> queued: int
 
 	// calling - the number of application dispatchers on your machine
-	err := c.Histogram("calling", r.Calling, nil, 1)
+	err := c.Histogram("calling", float64(r.Calling), nil, 1)
 	checkError(err)
 	// writing - the number of clients being written to on your machine
-	err = c.Histogram("writing", r.Writing, nil, 1)
+	err = c.Histogram("writing", float64(r.Writing), nil, 1)
 	checkError(err)
 	// queued - total number of queued (pre-accept()) clients on that listener
-	err = c.Histogram("queued", r.Queued, nil, 1)
+	err = c.Histogram("queued", float64(r.Queued), nil, 1)
 	checkError(err)
 	// active - total number of active clients on that listener
-	err = c.Histogram("active", r.Active, nil, 1)
+	err = c.Histogram("active", float64(r.Active), nil, 1)
 	checkError(err)
 	if useThreads == "true" {
 		// threads.count - total number of allowed threads
-		err = c.Histogram("threads.count", tc.Count, nil, 1)
+		err = c.Histogram("threads.count", float64(tc.Count), nil, 1)
 		checkError(err)
 	} else {
 		// worker.count - total number of provisioned workers
-		err = c.Histogram("worker.count", tc.Count, nil, 1)
+		err = c.Histogram("worker.count", float64(tc.Count), nil, 1)
 		checkError(err)
 	}
 }
