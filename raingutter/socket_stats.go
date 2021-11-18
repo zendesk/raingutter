@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"io/ioutil"
+	"path"
 	"strconv"
 	"strings"
 
@@ -35,14 +36,14 @@ func stripMenu(s string) string {
 }
 
 // GetSocketStats combines the tcp and tcp6 /proc/net files to get a list of all ipv4 and ipv6 sockets
-func GetSocketStats() (string, error) {
-	s6, err := ioutil.ReadFile("/proc/net/tcp6")
+func GetSocketStats(procDir string) (string, error) {
+	s6, err := ioutil.ReadFile(path.Join(procDir, "net/tcp6"))
 	if err != nil {
 		return "", err
 	}
 	ipv6sockets := stripMenu(string(s6))
 
-	s4, err := ioutil.ReadFile("/proc/net/tcp")
+	s4, err := ioutil.ReadFile(path.Join(procDir, "net/tcp"))
 	if err != nil {
 		return "", err
 	}

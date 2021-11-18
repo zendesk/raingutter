@@ -41,6 +41,7 @@ The following environment variables can be used to configure Raingutter:
 * `RG_USE_SOCKET_STATS`: Deprecated - use `RG_SOCKET_STATS_MODE` instead. If set to `true`, will behave like `RG_SOCKET_STATS_MODE == "proc_net"`, and if set to `false` will behave like `RG_SOCKET_STATS_MODE == "raindrops"`.
 * `RG_FREQUENCY`: Polling frequency in milliseconds (default: `500`)
 * `RG_SERVER_PORT`: Where the web server listens to
+* `RG_PROC_DIRECTORY`: Path to `/proc` directory to use. Useful when running in a container to point to a path where the host's `/proc` directory is mounted.
 
 ##### Pre-fork web servers (Unicorn)
 * `UNICORN_WORKERS`: Total number of unicorn workers (required if running on K8s)

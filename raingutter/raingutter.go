@@ -313,6 +313,12 @@ func main() {
 	}
 	serverPortShort := uint16(serverPortInt)
 
+	procDir := os.Getenv("RG_PROC_DIRECTORY")
+	if procDir == "" {
+		procDir = "/proc"
+	}
+	log.Info("RG_PROC_DIRECTORY: ", procDir)
+
 	// raingutter polling frequency expressed in ms
 	frequency := os.Getenv("RG_FREQUENCY")
 	if frequency == "" {
@@ -412,7 +418,7 @@ func main() {
 
 		switch socketStatsMode {
 		case "proc_net":
-			rawStats, err := GetSocketStats()
+			rawStats, err := GetSocketStats(procDir)
 			if err != nil {
 				log.Error(err)
 			}
