@@ -11,30 +11,41 @@ import (
 	"time"
 )
 
-func testNetlinkSocketStatsImpl(t *testing.T, bindAddr string) {
-	// Set up a listener socket
+func listenAndGetInodeNumber(t *testing.T, bindAddr string) (*net.TCPListener, uint64) {
 	l, err := net.Listen("tcp", bindAddr)
 	if err != nil {
 		t.Fatalf("failed to listen: %s", err)
 	}
-	port := uint16(l.Addr().(*net.TCPAddr).Port)
 	listenerFd, err := l.(*net.TCPListener).File()
 	if err != nil {
+		l.Close()
 		t.Fatalf("failed to get fd for listener: %s", err)
 	}
 	listenerInodeStr, err := os.Readlink(fmt.Sprintf("/proc/self/fd/%d", listenerFd.Fd()))
 	if err != nil {
+		l.Close()
 		t.Fatalf("failed to readlink fd for listener: %s", err)
 	}
 	socketIndoeRegexp := regexp.MustCompile(`socket:\[([0-9]+)\]`)
 	matches := socketIndoeRegexp.FindStringSubmatch(listenerInodeStr)
 	if len(matches) < 2 {
+		l.Close()
 		t.Fatalf("could not parse socket inode %s", listenerInodeStr)
 	}
 	listenerInode, err := strconv.Atoi(matches[1])
 	if err != nil {
+		l.Close()
 		t.Fatalf("could not convert socket inode %s to int: %s", matches[1], err)
 	}
+
+	return l.(*net.TCPListener), uint64(listenerInode)
+}
+
+func testNetlinkSocketStatsImpl(t *testing.T, bindAddr string) {
+	// Set up a listener socket
+	l, listenerInode := listenAndGetInodeNumber(t, bindAddr)
+	defer l.Close()
+	port := uint16(l.Addr().(*net.TCPAddr).Port)
 
 	rnlc, err := NewRaingutterNetlinkConnection()
 	if err != nil {

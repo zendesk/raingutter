@@ -11,7 +11,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -mod=vendor -ldflags "-X main.version=$
     raingutter/raingutter.go  \
     raingutter/socket_stats.go \
     raingutter/prometheus.go \
-    raingutter/netlink_socket_stats.go
+    raingutter/netlink_socket_stats.go \
+    raingutter/process.go
 
 FROM scratch
 

@@ -329,6 +329,13 @@ func main() {
 	log.Info("RG_FREQUENCY: ", frequency)
 	freqInt, _ := strconv.Atoi(frequency)
 
+
+	memoryStatsEnabledStr := os.Getenv("RG_MEMORY_STATS_ENABLED")
+	memoryStatsEnabled := false
+	if strings.ToLower(memoryStatsEnabledStr) == "true" {
+		memoryStatsEnabled = true
+	}
+
 	if podName == "" {
 		log.Warn("POD_NAME is missing")
 	}
@@ -447,6 +454,19 @@ func main() {
 			} else {
 				r.ScanSocketStats(&stats)
 				didScan = true
+			}
+		}
+
+		if memoryStatsEnabled {
+			serverProcs, err := FindProcessesListeningToSocket(procDir, r.ListenerSocketInode)
+			if err != nil {
+				log.Error(err)
+			} else {
+				var pids []int
+				for _, s := range serverProcs {
+					pids = append(pids, s.Pid)
+				}
+				log.Infof("Found unicorn pids: %+v", pids)
 			}
 		}
 
