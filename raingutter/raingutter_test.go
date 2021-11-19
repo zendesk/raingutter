@@ -43,7 +43,7 @@ func TestFetch(t *testing.T) {
 		}))
 		defer ts.Close()
 		timeout := time.Duration(3 * time.Second)
-		httpClient := http.Client{
+		httpClient := &http.Client{
 			Timeout: timeout,
 		}
 		res := Fetch(httpClient, ts.URL, &s)
@@ -60,7 +60,7 @@ func TestScan(t *testing.T) {
 		}))
 		defer ts.Close()
 		timeout := time.Duration(3 * time.Second)
-		httpClient := http.Client{
+		httpClient := &http.Client{
 			Timeout: timeout,
 		}
 		s := status{Ready: true}

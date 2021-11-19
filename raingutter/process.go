@@ -17,19 +17,19 @@ type ServerProcess struct {
 }
 
 type ServerProcessCollection struct {
-	ProcDirFDs map[int]*os.File
+	ProcDirFDs       map[int]*os.File
 	ProcInodesToPids map[uint64]int
-	MasterPids []int
-	WorkerPids []int
+	MasterPids       []int
+	WorkerPids       []int
 }
 
 // linuxDirent64 is linux_dirent64 from linux/dirent.h
 type linuxDirent64 struct {
-	DIno uint64 // u64 d_ino
-	DOff int64 // s64 d_off
+	DIno    uint64 // u64 d_ino
+	DOff    int64  // s64 d_off
 	DReclen uint16 // unsigned short d_reclen
-	DType uint8 // unsigned char d_type
-	DName byte // The first byte of flexible array member char d_name[]
+	DType   uint8  // unsigned char d_type
+	DName   byte   // The first byte of flexible array member char d_name[]
 }
 
 func FindProcessesListeningToSocket(procDir string, socketInode uint64) (result *ServerProcessCollection, errret error) {
@@ -56,10 +56,9 @@ func FindProcessesListeningToSocket(procDir string, socketInode uint64) (result 
 		}
 	}()
 
-
 	for _, entry := range procEntries {
 		// use an IIFE so that we can defer closing the directory FD.
-		func(){
+		func() {
 			if !entry.IsDir() {
 				return
 			}
@@ -68,7 +67,7 @@ func FindProcessesListeningToSocket(procDir string, socketInode uint64) (result 
 				// Not a proc/$PID directory
 				return
 			}
-			dirFD, err := os.OpenFile(path.Join(procDir, entry.Name()), os.O_RDONLY | unix.O_DIRECTORY, 0)
+			dirFD, err := os.OpenFile(path.Join(procDir, entry.Name()), os.O_RDONLY|unix.O_DIRECTORY, 0)
 			if err != nil {
 				// failed to open the directory - process may simply have died before we could open it.
 				return
@@ -97,9 +96,8 @@ func FindProcessesListeningToSocket(procDir string, socketInode uint64) (result 
 				return
 			}
 
-
 			// See if it has an open file with the given socketInode.
-			fdDirFD, err := unix.Openat(int(dirFD.Fd()), "fd", os.O_RDONLY | unix.O_DIRECTORY, 0)
+			fdDirFD, err := unix.Openat(int(dirFD.Fd()), "fd", os.O_RDONLY|unix.O_DIRECTORY, 0)
 			if err != nil {
 				// could have exited
 				return
@@ -175,7 +173,7 @@ func parseParentPidFromProc(procDirFd int) (int, error) {
 	statStr := string(statData)
 	endOfField2 := strings.LastIndex(statStr, ")")
 	// Everything after endOfField2 can just be string.split'd
-	fieldsThreeOnwards := strings.Split(statStr[endOfField2 + 2:len(statStr)], " ")
+	fieldsThreeOnwards := strings.Split(statStr[endOfField2+2:len(statStr)], " ")
 	if len(fieldsThreeOnwards) < 2 {
 		return -1, fmt.Errorf("malformed stat file: field count")
 	}
@@ -209,8 +207,8 @@ func (c *ServerProcessCollection) computeParentChildRelations(procDir string) {
 		// Parent pid of pid1 is 0, so that's our loop termination condition.
 		pidIsDescendantOfAnotherPid := false
 		for thisPid != 0 && !pidIsDescendantOfAnotherPid {
-			func(){
-				thisPidFD, err := os.OpenFile(path.Join(procDir, strconv.Itoa(thisPid)), unix.O_RDONLY | unix.O_DIRECTORY, 0)
+			func() {
+				thisPidFD, err := os.OpenFile(path.Join(procDir, strconv.Itoa(thisPid)), unix.O_RDONLY|unix.O_DIRECTORY, 0)
 				if err != nil {
 					// process could have exited.
 					thisPid = 0

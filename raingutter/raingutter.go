@@ -26,11 +26,27 @@ var (
 )
 
 type raingutter struct {
-	Calling uint64
-	Writing uint64
-	Active  uint64
-	Queued  uint64
+	Calling             uint64
+	Writing             uint64
+	Active              uint64
+	Queued              uint64
 	ListenerSocketInode uint64
+
+	raindropsStatus status
+	tc              totalConnections
+
+	socketStatsMode    string
+	rnlc               *RaingutterNetlinkConnection
+	httpClient         *http.Client
+	procDir            string
+	serverPort         uint16
+	raindropsURL       string
+	memoryStatsEnabled bool
+	statsdEnabled      bool
+	prometheusEnabled  bool
+	logMetricsEnabled  bool
+	statsdClient       *statsd.Client
+	useThreads         bool
 }
 
 type status struct {
@@ -96,7 +112,7 @@ func getWorkers(tc *totalConnections) {
 }
 
 // Fetch the raindrops output and convert it to a slice on strings
-func Fetch(c http.Client, url string, s *status) *http.Response {
+func Fetch(c *http.Client, url string, s *status) *http.Response {
 	request, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		log.Error(err)
@@ -171,7 +187,7 @@ func (r *raingutter) ScanSocketStats(s *SocketStats) raingutter {
 // according to what's specified in /etc/dd-agent/datadog.conf
 //
 // https://docs.datadoghq.com/guides/dogstatsd/
-func (r *raingutter) sendStats(c *statsd.Client, tc *totalConnections, useThreads string) {
+func (r *raingutter) sendStats(c *statsd.Client, tc *totalConnections, useThreads bool) {
 	// calling: int
 	// writing: int
 	//
@@ -191,7 +207,7 @@ func (r *raingutter) sendStats(c *statsd.Client, tc *totalConnections, useThread
 	// active - total number of active clients on that listener
 	err = c.Histogram("active", float64(r.Active), nil, 1)
 	checkError(err)
-	if useThreads == "true" {
+	if useThreads {
 		// threads.count - total number of allowed threads
 		err = c.Histogram("threads.count", float64(tc.Count), nil, 1)
 		checkError(err)
@@ -329,7 +345,6 @@ func main() {
 	log.Info("RG_FREQUENCY: ", frequency)
 	freqInt, _ := strconv.Atoi(frequency)
 
-
 	memoryStatsEnabledStr := os.Getenv("RG_MEMORY_STATS_ENABLED")
 	memoryStatsEnabled := false
 	if strings.ToLower(memoryStatsEnabledStr) == "true" {
@@ -349,135 +364,149 @@ func main() {
 	}
 
 	r := raingutter{}
+	r.socketStatsMode = socketStatsMode
+	r.procDir = procDir
+	r.serverPort = serverPortShort
+	r.raindropsURL = raindropsURL
+	r.memoryStatsEnabled = memoryStatsEnabled
+	r.statsdEnabled = statsdEnabled == "true"
+	r.prometheusEnabled = prometheusEnabled == "true"
+	r.logMetricsEnabled = logMetricsEnabled == "true"
+	r.useThreads = useThreads == "true"
 
 	// Create an http client
-	timeout := time.Duration(3 * time.Second)
-	httpClient := http.Client{
-		Timeout: timeout,
+	r.httpClient = &http.Client{
+		Timeout: 3 * time.Second,
+	}
+
+	if socketStatsMode == "netlink" {
+		r.rnlc, err = NewRaingutterNetlinkConnection()
+		if err != nil {
+			log.Fatal("error creating netlink connection: ", err)
+		}
+		defer r.rnlc.Close()
 	}
 
 	// Create a statsd udp client
 	statsdURL := statsdHost + ":" + statsdPort
-	statsdClient, err := statsd.New(statsdURL)
+	r.statsdClient, err = statsd.New(statsdURL)
 	if err != nil {
 		log.Error(err)
 	}
 
 	// Define namespace
-	statsdClient.Namespace = statsdNamespace
+	r.statsdClient.Namespace = statsdNamespace
 
 	// Add k8s tags
 	if podName != "" {
 		tag := "pod_name:" + podName
-		statsdClient.Tags = append(statsdClient.Tags, tag)
+		r.statsdClient.Tags = append(r.statsdClient.Tags, tag)
 	}
 
 	if podNameSpace != "" {
 		tag := "pod_namespace:" + podNameSpace
-		statsdClient.Tags = append(statsdClient.Tags, tag)
+		r.statsdClient.Tags = append(r.statsdClient.Tags, tag)
 	}
 
 	if project != "" {
 		tag := "project:" + project
-		statsdClient.Tags = append(statsdClient.Tags, tag)
+		r.statsdClient.Tags = append(r.statsdClient.Tags, tag)
 	}
 
 	// Add extra tags
 	if statsdExtraTags != "" {
 		tags := strings.Split(statsdExtraTags, ",")
-		statsdClient.Tags = append(statsdClient.Tags, tags...)
+		r.statsdClient.Tags = append(r.statsdClient.Tags, tags...)
 	}
 
 	// Setup os signals catching
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		s := <-sigs
-		log.Fatal("Received signal: ", s)
-	}()
 
-	tc := totalConnections{Count: 0}
-	if useThreads == "true" {
-		getThreads(&tc)
+	workerMetricsTicker := time.NewTicker(60 * time.Second)
+	defer workerMetricsTicker.Stop()
+	socketMetricsTicker := time.NewTicker(time.Duration(freqInt) * time.Millisecond)
+	defer socketMetricsTicker.Stop()
 
-	} else {
-		go func() {
-			for {
-				getWorkers(&tc)
-				// sleep for a minute
-				<-time.After(60 * time.Second)
-			}
-		}()
-	}
+	// Prime worker metrics once - because the socket metrics divide some numbers by the
+	// total number of workers.
+	r.collectAndEmitWorkerMetrics()
 
-	var rnlc *RaingutterNetlinkConnection
-	if socketStatsMode == "netlink" {
-		rnlc, err = NewRaingutterNetlinkConnection()
-		if err != nil {
-			log.Fatal("error creating netlink connection: ", err)
-		}
-		defer rnlc.Close()
-	}
-
-	readiness := status{Ready: false}
+mainloop:
 	for {
-		didScan := false
+		select {
+		case <-workerMetricsTicker.C:
+			r.collectAndEmitWorkerMetrics()
+		case <-socketMetricsTicker.C:
+			r.collectAndEmitSocketMetrics()
+		case s := <-sigs:
+			log.Infof("received signal %s; exiting", s.String())
+			break mainloop
+		}
+	}
+}
 
-		time.Sleep(time.Millisecond * time.Duration(freqInt))
-
-		switch socketStatsMode {
-		case "proc_net":
-			rawStats, err := GetSocketStats(procDir)
-			if err != nil {
-				log.Error(err)
-			}
-
-			stats, err := ParseSocketStats(serverPort, rawStats)
-			if err != nil {
-				log.Error(err)
-			} else {
-				r.ScanSocketStats(stats)
-				didScan = true
-			}
-		case "raindrops":
-			// if SocketStats is disabled, raingutter will use the raindrops endpoint
-			// to retrieve metrics from the unicorn master
-			body := Fetch(httpClient, raindropsURL, &readiness)
-			if body != nil {
-				r.Scan(body)
-				didScan = true
-			}
-		case "netlink":
-			stats, err := rnlc.ReadStats(serverPortShort)
-			if err != nil {
-				log.Error(err)
-			} else {
-				r.ScanSocketStats(&stats)
-				didScan = true
-			}
+func (r *raingutter) collectAndEmitSocketMetrics() {
+	didScan := false
+	switch r.socketStatsMode {
+	case "proc_net":
+		rawStats, err := GetSocketStats(r.procDir)
+		if err != nil {
+			log.Error(err)
 		}
 
-		if memoryStatsEnabled {
-			serverProcs, err := FindProcessesListeningToSocket(procDir, r.ListenerSocketInode)
-			if err != nil {
-				log.Error(err)
-			} else {
-				log.Infof("Found unicorn pids: master %+v, worker %+v", serverProcs.MasterPids, serverProcs.WorkerPids)
-				serverProcs.Close()
-			}
+		stats, err := ParseSocketStats(r.serverPort, rawStats)
+		if err != nil {
+			log.Error(err)
+		} else {
+			r.ScanSocketStats(stats)
+			didScan = true
 		}
-
-		if didScan {
-			if statsdEnabled == "true" {
-				r.sendStats(statsdClient, &tc, useThreads)
-			}
-			if prometheusEnabled == "true" {
-				r.recordMetrics(&tc, useThreads)
-			}
-			if logMetricsEnabled == "true" {
-				r.logMetrics(&tc, raindropsURL)
-			}
+	case "raindrops":
+		// if SocketStats is disabled, raingutter will use the raindrops endpoint
+		// to retrieve metrics from the unicorn master
+		body := Fetch(r.httpClient, r.raindropsURL, &r.raindropsStatus)
+		if body != nil {
+			r.Scan(body)
+			didScan = true
+		}
+	case "netlink":
+		stats, err := r.rnlc.ReadStats(r.serverPort)
+		if err != nil {
+			log.Error(err)
+		} else {
+			r.ScanSocketStats(&stats)
+			didScan = true
 		}
 	}
 
+	if r.memoryStatsEnabled {
+		serverProcs, err := FindProcessesListeningToSocket(r.procDir, r.ListenerSocketInode)
+		if err != nil {
+			log.Error(err)
+		} else {
+			log.Infof("Found unicorn pids: master %+v, worker %+v", serverProcs.MasterPids, serverProcs.WorkerPids)
+			serverProcs.Close()
+		}
+	}
+
+	if didScan {
+		if r.statsdEnabled {
+			r.sendStats(r.statsdClient, &r.tc, r.useThreads)
+		}
+		if r.prometheusEnabled {
+			r.recordMetrics(&r.tc, r.useThreads)
+		}
+		if r.logMetricsEnabled {
+			r.logMetrics(&r.tc, r.raindropsURL)
+		}
+	}
+}
+
+func (r *raingutter) collectAndEmitWorkerMetrics() {
+	if r.useThreads {
+		getThreads(&r.tc)
+	} else {
+		getWorkers(&r.tc)
+	}
 }

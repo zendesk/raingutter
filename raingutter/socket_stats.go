@@ -19,7 +19,7 @@ type SocketStats struct {
 }
 
 type Socket struct {
-	LocalPort int64
+	LocalPort uint16
 	ConnState string
 	Inode     string
 	QueueSize uint64
@@ -68,7 +68,7 @@ func ParseSocket(s string) (Socket, error) {
 	if len(lp) < 2 {
 		return Socket{}, errors.New("could not parse socket local address: " + localAddr)
 	}
-	localPort, err := strconv.ParseInt(lp[1], 16, 0)
+	localPort, err := strconv.ParseUint(lp[1], 16, 16)
 	if err != nil {
 		return Socket{}, err
 	}
@@ -96,16 +96,11 @@ func ParseSocket(s string) (Socket, error) {
 		return Socket{}, err
 	}
 
-	return Socket{localPort, connState, inode, uint64(queueSize)}, nil
+	return Socket{uint16(localPort), connState, inode, uint64(queueSize)}, nil
 
 }
 
-func ParseSocketStats(serverPort string, ssOutput string) (*SocketStats, error) {
-	port, err := strconv.Atoi(serverPort)
-	if err != nil {
-		return nil, err
-	}
-
+func ParseSocketStats(port uint16, ssOutput string) (*SocketStats, error) {
 	var queueSize uint64
 	var activeWorkers uint64
 	var listenerInode uint64
@@ -125,7 +120,7 @@ func ParseSocketStats(serverPort string, ssOutput string) (*SocketStats, error) 
 		// we only want sockets on our port (to filter for Unicorn sockets)
 		// we also ignore TIME-WAIT sockets - they've been handed off to the kernel
 		// to sit on ice, Unicorn no longer cares
-		if int(socket.LocalPort) != port || socket.ConnState == "TIME-WAIT" {
+		if socket.LocalPort != port || socket.ConnState == "TIME-WAIT" {
 			continue
 		}
 
