@@ -462,11 +462,8 @@ func main() {
 			if err != nil {
 				log.Error(err)
 			} else {
-				var pids []int
-				for _, s := range serverProcs {
-					pids = append(pids, s.Pid)
-				}
-				log.Infof("Found unicorn pids: %+v", pids)
+				log.Infof("Found unicorn pids: master %+v, worker %+v", serverProcs.MasterPids, serverProcs.WorkerPids)
+				serverProcs.Close()
 			}
 		}
 
