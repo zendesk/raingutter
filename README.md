@@ -35,8 +35,8 @@ More information about how to build a `deb` package can be found in the build se
 The following environment variables can be used to configure Raingutter:
 
 * `RG_SOCKET_STATS_MODE`: How socket stats will be collected. Set to one of:
-    * `netlink` - reads stats from a `NETLINK_SOCK_DIAG` netlink socket (default)
-    * `proc_net` - parse the stats from the string data in `/proc/net/tcp`
+    * `proc_net` - parse the stats from the string data in `/proc/net/tcp` (default)
+    * `netlink` - reads stats from a `NETLINK_SOCK_DIAG` netlink socket.
     * `raindrops` - parse stats from the raindrops URL (must set `RG_RAINDROPS_URL`)
 * `RG_USE_SOCKET_STATS`: Deprecated - use `RG_SOCKET_STATS_MODE` instead. If set to `true`, will behave like `RG_SOCKET_STATS_MODE == "proc_net"`, and if set to `false` will behave like `RG_SOCKET_STATS_MODE == "raindrops"`.
 * `RG_FREQUENCY`: Polling frequency in milliseconds (default: `500`)

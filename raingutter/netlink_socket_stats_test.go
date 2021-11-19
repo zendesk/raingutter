@@ -47,7 +47,7 @@ func testNetlinkSocketStatsImpl(t *testing.T, bindAddr string) {
 	if err != nil {
 		t.Fatalf("failed to read stats: %s", err)
 	}
-	if stats.ListenerInode != uint32(listenerInode) {
+	if stats.ListenerInode != uint64(listenerInode) {
 		t.Fail()
 	}
 	// There should be nothing connected to it yet.

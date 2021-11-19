@@ -183,7 +183,11 @@ func (c *RaingutterNetlinkConnection) readStatsForFamily(family int, listenerPor
 
 		if diagReplyStruct.IdiagState == TcpListen {
 			// This is the listener socket.
-			statsRet.ListenerInode = diagReplyStruct.IdiagIndoe
+			// n.b. - inodes are usually 64-bits on Linux (hence we have statsRet.ListenerInode
+			// as uint64), but _socket_ inodes are only 32 bits (that's how they come out of the
+			// netlink API). What happens if you have more than four billion sockets open in a
+			// single network namespace is.... ???
+			statsRet.ListenerInode = uint64(diagReplyStruct.IdiagIndoe)
 			statsRet.QueueSize = uint64(diagReplyStruct.IdiagRqueue)
 		} else if isActiveTcpState(diagReplyStruct.IdiagState) {
 			statsRet.ActiveWorkers++

@@ -15,7 +15,7 @@ import (
 type SocketStats struct {
 	QueueSize     uint64
 	ActiveWorkers uint64
-	ListenerInode uint32
+	ListenerInode uint64
 }
 
 type Socket struct {
@@ -108,7 +108,7 @@ func ParseSocketStats(serverPort string, ssOutput string) (*SocketStats, error) 
 
 	var queueSize uint64
 	var activeWorkers uint64
-	var listenerInode uint32
+	var listenerInode uint64
 
 	sockets := strings.Split(ssOutput, "\n")
 	for _, s := range sockets {
@@ -133,9 +133,9 @@ func ParseSocketStats(serverPort string, ssOutput string) (*SocketStats, error) 
 		// at the Recv-Q size as a measure of queue depth
 		if socket.ConnState == "LISTEN" {
 			queueSize = socket.QueueSize
-			listenerInode64, err := strconv.ParseUint(socket.Inode, 10, 32)
+			listenerInodeVal, err := strconv.ParseUint(socket.Inode, 10, 64)
 			if err == nil {
-				listenerInode = uint32(listenerInode64)
+				listenerInode = listenerInodeVal
 			}
 		}
 

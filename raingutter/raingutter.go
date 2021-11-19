@@ -30,6 +30,7 @@ type raingutter struct {
 	Writing uint64
 	Active  uint64
 	Queued  uint64
+	ListenerSocketInode uint64
 }
 
 type status struct {
@@ -155,6 +156,7 @@ func (r *raingutter) ScanSocketStats(s *SocketStats) raingutter {
 	// `writing` and `calling` are not yet implemented
 	r.Active = s.ActiveWorkers
 	r.Queued = s.QueueSize
+	r.ListenerSocketInode = s.ListenerInode
 	return *r
 }
 
@@ -243,7 +245,7 @@ func main() {
 				socketStatsMode = "raindrops"
 			}
 		}
-		socketStatsMode = "netlink"
+		socketStatsMode = "proc_net"
 	}
 	if socketStatsMode != "netlink" && socketStatsMode != "proc_net" && socketStatsMode != "raindrops" {
 		log.Fatalf("Invalid value for RG_NET_POLL_MODE %s (should be netlink, proc_net, or raindrops)", socketStatsMode)
