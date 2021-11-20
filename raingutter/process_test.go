@@ -37,10 +37,10 @@ func TestFindProcessesListeningToSocket_SingleListener(t *testing.T) {
 	defer procs.Close()
 
 	// This process should be the only process using that socket.
-	if len(procs.ProcDirFDs) != 1 {
+	if len(procs.Processes) != 1 {
 		t.Fail()
 	}
-	if _, has := procs.ProcDirFDs[os.Getpid()]; !has {
+	if procs.Processes[0].Pid != os.Getpid() {
 		t.Fail()
 	}
 }
@@ -69,10 +69,35 @@ func TestFindProcessesListeningToSocket_Forked(t *testing.T) {
 		if err != nil {
 			t.Fatalf("error FindProcessesListeningToSocket: %s", err)
 		}
-		if len(procs.MasterPids) == 1 && len(procs.WorkerPids) == 1 &&
-			procs.MasterPids[0] == os.Getpid() && procs.WorkerPids[0] == childCmd.Process.Pid {
 
-			testPassed = true
+		testPassed = func() bool {
+			procsByPid := map[int]*ServerProcess{}
+			for _, proc := range procs.Processes {
+				procsByPid[proc.Pid] = proc
+			}
+
+			t.Logf("PROCS: %+v", procs.Processes)
+
+			if len(procs.Processes) != 2 {
+				return false
+			}
+			masterProc, has := procsByPid[os.Getpid()]
+			if !has {
+				return false
+			}
+			if !masterProc.IsMaster {
+				return false
+			}
+			workerProc, has := procsByPid[childCmd.Process.Pid]
+			if !has {
+				return false
+			}
+			if workerProc.IsMaster {
+				return false
+			}
+			return true
+		}()
+		if testPassed {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)

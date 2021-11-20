@@ -1,26 +1,36 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"unsafe"
 
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 )
 
-type ServerProcess struct {
-	Pid int
+type ServerProcessCollection struct {
+	Processes []*ServerProcess
 }
 
-type ServerProcessCollection struct {
-	ProcDirFDs       map[int]*os.File
-	ProcInodesToPids map[uint64]int
-	MasterPids       []int
-	WorkerPids       []int
+type ServerProcess struct {
+	Pid       int
+	ProcDirFD *os.File
+
+	// Identity
+	IsMaster bool
+	Index    int
+
+	// Memory stats
+	RSS  int
+	PSS  int
+	Anon int
 }
 
 // linuxDirent64 is linux_dirent64 from linux/dirent.h
@@ -31,6 +41,13 @@ type linuxDirent64 struct {
 	DType   uint8  // unsigned char d_type
 	DName   byte   // The first byte of flexible array member char d_name[]
 }
+
+var unicornWorkerRegexp = regexp.MustCompile(`unicorn[\x00\x20]+worker\[([0-9]+)\]`)
+var newMappingRegexp = regexp.MustCompile(`^([0-9a-f]+)-([0-9a-f]+)\s`)
+var vSyscallRegexp = regexp.MustCompile(`\[vsyscall\]$`)
+var anonymousRegexp = regexp.MustCompile(`^Anonymous:\s*([0-9]+)`)
+var rssRegexp = regexp.MustCompile(`^Rss:\s*([0-9]+)`)
+var pssRegexp = regexp.MustCompile(`^Pss:\s*([0-9]+)`)
 
 func FindProcessesListeningToSocket(procDir string, socketInode uint64) (result *ServerProcessCollection, errret error) {
 	// Check what network namespace _we_ are in.
@@ -45,9 +62,7 @@ func FindProcessesListeningToSocket(procDir string, socketInode uint64) (result 
 		return nil, fmt.Errorf("error reading dir %s: %w", procDir, err)
 	}
 
-	result = &ServerProcessCollection{
-		ProcDirFDs: map[int]*os.File{},
-	}
+	result = &ServerProcessCollection{}
 	defer func() {
 		// Ensure we don't leak pidFD's if we exit with an error.
 		if errret != nil && result != nil {
@@ -139,7 +154,10 @@ func FindProcessesListeningToSocket(procDir string, socketInode uint64) (result 
 			}
 
 			if pidHasListenerSocketOpened {
-				result.ProcDirFDs[pid] = dirFD
+				result.Processes = append(result.Processes, &ServerProcess{
+					Pid:       pid,
+					ProcDirFD: dirFD,
+				})
 				keepPidDirFD = true
 			}
 		}()
@@ -149,8 +167,8 @@ func FindProcessesListeningToSocket(procDir string, socketInode uint64) (result 
 }
 
 func (c *ServerProcessCollection) Close() {
-	for _, fd := range c.ProcDirFDs {
-		fd.Close()
+	for _, proc := range c.Processes {
+		proc.ProcDirFD.Close()
 	}
 }
 
@@ -186,20 +204,51 @@ func parseParentPidFromProc(procDirFd int) (int, error) {
 
 func (c *ServerProcessCollection) computeParentChildRelations(procDir string) {
 	// Build a map of proc inodes -> pid so we can answer "are these two processes the same"
-	c.ProcInodesToPids = make(map[uint64]int)
-	for pid, dirfd := range c.ProcDirFDs {
+	procInodesToPids := make(map[uint64]int)
+	for _, proc := range c.Processes {
 		var statData unix.Stat_t
-		err := unix.Fstat(int(dirfd.Fd()), &statData)
+		err := unix.Fstat(int(proc.ProcDirFD.Fd()), &statData)
 		if err == nil {
-			c.ProcInodesToPids[statData.Ino] = pid
+			procInodesToPids[statData.Ino] = proc.Pid
 		}
 	}
 
 	// Figure out which processes are (direct or indirect) children of which other ones.
 	// For every process, follow its parent chain until we get to PID1 or one of our existing
 	// processes.
-	for pid, dirfd := range c.ProcDirFDs {
-		thisPid, err := parseParentPidFromProc(int(dirfd.Fd()))
+	for _, proc := range c.Processes {
+		// This is a bit of a unicornism. We need a stable identifier for worker processes. We could use
+		// the pid, but that has pretty high cardinality - ideally we'd like something that's like 1-N, for N
+		// being the worker process count, that's also stable.
+		// Unicorn helpfully actually includes a worker index in /proc/self/cmdline.
+		cmdlineFD, err := unix.Openat(int(proc.ProcDirFD.Fd()), "cmdline", unix.O_RDONLY, 0)
+		if err != nil {
+			continue
+		}
+		cmdlineFile := os.NewFile(uintptr(cmdlineFD), "cmdline")
+		cmdlineBytes, err := io.ReadAll(cmdlineFile)
+		cmdlineFile.Close()
+		if err != nil {
+			continue
+		}
+		cmdline := string(cmdlineBytes)
+		if strings.HasPrefix(cmdline, "unicorn") {
+			if m := unicornWorkerRegexp.FindStringSubmatch(cmdline); m != nil {
+				proc.Index, err = strconv.Atoi(m[1])
+				if err != nil {
+					continue
+				}
+			} else {
+				proc.Index = -1
+			}
+		} else {
+			// I'm just going to set this as zero for non-unicorn.
+			// Setting this to a pid would "work", but it's too dangerous from an "accidentally emit lots of metrics"
+			// perspective.
+			proc.Index = 0
+		}
+
+		thisPid, err := parseParentPidFromProc(int(proc.ProcDirFD.Fd()))
 		if err != nil {
 			continue
 		}
@@ -222,7 +271,7 @@ func (c *ServerProcessCollection) computeParentChildRelations(procDir string) {
 					thisPid = 0
 					return
 				}
-				if _, has := c.ProcInodesToPids[statData.Ino]; has {
+				if _, has := procInodesToPids[statData.Ino]; has {
 					// The process `pid` is a (direct or indirect) child of another process in `c.ProcDirFds`.
 					pidIsDescendantOfAnotherPid = true
 					return
@@ -237,9 +286,96 @@ func (c *ServerProcessCollection) computeParentChildRelations(procDir string) {
 		}
 
 		if pidIsDescendantOfAnotherPid {
-			c.WorkerPids = append(c.WorkerPids, pid)
+			proc.IsMaster = false
 		} else {
-			c.MasterPids = append(c.MasterPids, pid)
+			proc.IsMaster = true
 		}
+	}
+}
+
+func (c *ServerProcessCollection) workerCount() int {
+	ct := 0
+	for _, proc := range c.Processes {
+		if !proc.IsMaster {
+			ct++
+		}
+	}
+	return ct
+}
+
+func (c *ServerProcessCollection) collectMemoryStats() {
+	for _, proc := range c.Processes {
+		func() {
+			mappingsFD, err := unix.Openat(int(proc.ProcDirFD.Fd()), "smaps", unix.O_RDONLY, 0)
+			if err != nil {
+				return
+			}
+			mappingsFile := os.NewFile(uintptr(mappingsFD), "smaps")
+			defer mappingsFile.Close()
+
+			// Parsing /proc/$pid/smaps is a real PITA.
+			smapsScanner := bufio.NewScanner(mappingsFile)
+			smapsScanner.Split(bufio.ScanLines)
+
+			type mappingT struct {
+				startAddr uint64
+				endAddr   uint64
+				anonBytes uint64
+				rssBytes  uint64
+				pssBytes  uint64
+			}
+			var mappings []*mappingT
+			var thisMapping *mappingT
+			for smapsScanner.Scan() {
+				line := smapsScanner.Text()
+				if m := newMappingRegexp.FindStringSubmatch(line); m != nil {
+					thisMapping = &mappingT{}
+					thisMapping.startAddr, err = strconv.ParseUint(m[1], 16, 64)
+					if err != nil {
+						log.Warnf("failed to parse /proc/%d/smaps: line %s", proc.Pid, line)
+						return
+					}
+					thisMapping.endAddr, err = strconv.ParseUint(m[2], 16, 64)
+					if err != nil {
+						log.Warnf("failed to parse /proc/%d/smaps: line %s", proc.Pid, line)
+						return
+					}
+					if !vSyscallRegexp.MatchString(line) {
+						mappings = append(mappings, thisMapping)
+					}
+				} else if m := anonymousRegexp.FindStringSubmatch(line); m != nil {
+					anonKb, err := strconv.ParseUint(m[1], 10, 64)
+					if err != nil {
+						log.Warnf("failed to parse /proc/%d/smaps: line %s", proc.Pid, line)
+						return
+					}
+					thisMapping.anonBytes = anonKb * 1024
+				} else if m := rssRegexp.FindStringSubmatch(line); m != nil {
+					rssKb, err := strconv.ParseUint(m[1], 10, 64)
+					if err != nil {
+						log.Warnf("failed to parse /proc/%d/smaps: line %s", proc.Pid, line)
+						return
+					}
+					thisMapping.rssBytes = rssKb * 1024
+				} else if m := pssRegexp.FindStringSubmatch(line); m != nil {
+					pssKb, err := strconv.ParseUint(m[1], 10, 64)
+					if err != nil {
+						log.Warnf("failed to parse /proc/%d/smaps: line %s", proc.Pid, line)
+						return
+					}
+					thisMapping.pssBytes = pssKb * 1024
+				}
+			}
+
+			// Sum up values over all pages
+			proc.RSS = 0
+			proc.PSS = 0
+			proc.Anon = 0
+			for _, mapping := range mappings {
+				proc.RSS += int(mapping.rssBytes)
+				proc.PSS += int(mapping.pssBytes)
+				proc.Anon += int(mapping.anonBytes)
+			}
+		}()
 	}
 }

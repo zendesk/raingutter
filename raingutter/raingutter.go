@@ -31,7 +31,8 @@ type raingutter struct {
 	ListenerSocketInode uint64
 
 	raindropsStatus status
-	workerCount int
+	workerCount     int
+	serverProcesses *ServerProcessCollection
 
 	socketStatsMode    string
 	rnlc               *RaingutterNetlinkConnection
@@ -45,8 +46,8 @@ type raingutter struct {
 	logMetricsEnabled  bool
 	statsdClient       *statsd.Client
 	useThreads         bool
-	staticWorkerCount int
-	workerCountMode string
+	staticWorkerCount  int
+	workerCountMode    string
 }
 
 type status struct {
@@ -141,7 +142,7 @@ func (r *raingutter) ScanSocketStats(s *SocketStats) raingutter {
 // according to what's specified in /etc/dd-agent/datadog.conf
 //
 // https://docs.datadoghq.com/guides/dogstatsd/
-func (r *raingutter) sendStats() {
+func (r *raingutter) sendSocketStats() {
 	// calling: int
 	// writing: int
 	//
@@ -161,23 +162,56 @@ func (r *raingutter) sendStats() {
 	// active - total number of active clients on that listener
 	err = r.statsdClient.Histogram("active", float64(r.Active), nil, 1)
 	checkError(err)
+}
+
+func (r *raingutter) sendWorkerStats() {
 	if r.useThreads {
 		// threads.count - total number of allowed threads
-		err = r.statsdClient.Histogram("threads.count", float64(r.workerCount), nil, 1)
+		err := r.statsdClient.Histogram("threads.count", float64(r.workerCount), nil, 1)
 		checkError(err)
 	} else {
 		// worker.count - total number of provisioned workers
-		err = r.statsdClient.Histogram("worker.count", float64(r.workerCount), nil, 1)
+		err := r.statsdClient.Histogram("worker.count", float64(r.workerCount), nil, 1)
 		checkError(err)
+
+		// Emit memory statistics, if available
+		if r.serverProcesses != nil && r.memoryStatsEnabled {
+			for _, proc := range r.serverProcesses.Processes {
+				if !proc.IsMaster && proc.Index == -1 {
+					// This is a very unlikely but possible race condition, where the unicorn master
+					// has forked but the child has not yet changed /proc/self/cmdline, do we don't
+					// know its index yet. Just skip reporting memory for this.
+					continue
+				}
+				tags := []string{
+					fmt.Sprintf("ismaster:%t", proc.IsMaster),
+					fmt.Sprintf("index:%d", proc.Index),
+				}
+
+				err = r.statsdClient.Distribution("process.rss", float64(proc.RSS), tags, 1)
+				checkError(err)
+				err = r.statsdClient.Distribution("process.pss", float64(proc.PSS), tags, 1)
+				checkError(err)
+				err = r.statsdClient.Distribution("process.anon", float64(proc.Anon), tags, 1)
+				checkError(err)
+			}
+		}
 	}
 }
 
-func (r *raingutter) logMetrics() {
+func (r *raingutter) logSocketMetrics() {
 	contextLogger := log.WithFields(log.Fields{
 		"active":  r.Active,
 		"queued":  r.Queued,
 		"writing": r.Writing,
 		"calling": r.Calling,
+		"workers": r.workerCount,
+	})
+	contextLogger.Info(r.raindropsURL)
+}
+
+func (r *raingutter) logWorkerMetrics() {
+	contextLogger := log.WithFields(log.Fields{
 		"workers": r.workerCount,
 	})
 	contextLogger.Info(r.raindropsURL)
@@ -312,7 +346,6 @@ func main() {
 	}
 	log.Info("RG_FREQUENCY_WORKER: ", workerFrequencyInt)
 
-
 	memoryStatsEnabledStr := os.Getenv("RG_MEMORY_STATS_ENABLED")
 	memoryStatsEnabled := false
 	if strings.ToLower(memoryStatsEnabledStr) == "true" {
@@ -368,7 +401,7 @@ func main() {
 		// or UNICORN_WORKERS is not specified
 		if r.staticWorkerCount == 0 {
 			r.workerCountMode = "socket_inode"
-		} else{
+		} else {
 			r.workerCountMode = "static"
 		}
 	}
@@ -430,6 +463,12 @@ func main() {
 	socketMetricsTicker := time.NewTicker(time.Duration(freqInt) * time.Millisecond)
 	defer socketMetricsTicker.Stop()
 
+	defer func() {
+		if r.serverProcesses != nil {
+			r.serverProcesses.Close()
+		}
+	}()
+
 	// Prime worker metrics once - because the socket metrics divide some numbers by the
 	// total number of workers.
 	r.collectAndEmitWorkerMetrics()
@@ -484,13 +523,13 @@ func (r *raingutter) collectAndEmitSocketMetrics() {
 
 	if didScan {
 		if r.statsdEnabled {
-			r.sendStats()
+			r.sendSocketStats()
 		}
 		if r.prometheusEnabled {
-			r.recordMetrics()
+			r.recordSocketMetrics()
 		}
 		if r.logMetricsEnabled {
-			r.logMetrics()
+			r.logSocketMetrics()
 		}
 	}
 }
@@ -500,12 +539,28 @@ func (r *raingutter) collectAndEmitWorkerMetrics() {
 	case "static":
 		r.workerCount = r.staticWorkerCount
 	case "socket_inode":
-		serverProcs, err := FindProcessesListeningToSocket(r.procDir, r.ListenerSocketInode)
+		if r.serverProcesses != nil {
+			r.serverProcesses.Close()
+		}
+		var err error
+		r.serverProcesses, err = FindProcessesListeningToSocket(r.procDir, r.ListenerSocketInode)
 		if err != nil {
 			log.Error(err)
 			return
 		}
-		defer serverProcs.Close()
-		r.workerCount = len(serverProcs.WorkerPids)
+		r.workerCount = r.serverProcesses.workerCount()
+		if r.memoryStatsEnabled {
+			r.serverProcesses.collectMemoryStats()
+		}
+	}
+
+	if r.statsdEnabled {
+		r.sendWorkerStats()
+	}
+	if r.prometheusEnabled {
+		r.recordWorkerMetrics()
+	}
+	if r.logMetricsEnabled {
+		r.logWorkerMetrics()
 	}
 }
