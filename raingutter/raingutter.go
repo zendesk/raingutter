@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -18,7 +17,6 @@ import (
 )
 
 var (
-	execCommand  = exec.Command
 	version      string
 	podName      = os.Getenv("POD_NAME")
 	podNameSpace = os.Getenv("POD_NAMESPACE")
@@ -33,7 +31,7 @@ type raingutter struct {
 	ListenerSocketInode uint64
 
 	raindropsStatus status
-	tc              totalConnections
+	workerCount int
 
 	socketStatsMode    string
 	rnlc               *RaingutterNetlinkConnection
@@ -47,14 +45,12 @@ type raingutter struct {
 	logMetricsEnabled  bool
 	statsdClient       *statsd.Client
 	useThreads         bool
+	staticWorkerCount int
+	workerCountMode string
 }
 
 type status struct {
 	Ready bool
-}
-
-type totalConnections struct {
-	Count uint64
 }
 
 func checkError(err error) {
@@ -66,48 +62,6 @@ func checkError(err error) {
 func checkFatal(err error) {
 	if err != nil {
 		log.Fatal(err)
-	}
-}
-
-func getThreads(tc *totalConnections) {
-	maxThreads := os.Getenv("MAX_THREADS")
-	if maxThreads == "" {
-		log.Fatal("MAX_THREADS is not defined.")
-	}
-	threads, err := strconv.ParseUint(maxThreads, 10, 64)
-	checkFatal(err)
-	tc.Count = threads
-}
-
-func getWorkers(tc *totalConnections) {
-	var (
-		workers uint64
-		cmdOut  []byte
-		err     error
-	)
-	unicornWorkers := os.Getenv("UNICORN_WORKERS")
-	// If the UNICORN_WORKERS env var is empty fallback on pgrep
-	// This is meant to be used on VM or bare metal
-	if unicornWorkers == "" {
-		binary, lookErr := exec.LookPath("pgrep")
-		checkFatal(lookErr)
-		args := []string{"-fc", "helper.sh"}
-		if cmdOut, err = execCommand(binary, args...).CombinedOutput(); err != nil {
-			log.Error(binary, " returned: ", err)
-			workers = 0
-			log.Warn("Unicorn workers count set to 0")
-			tc.Count = workers
-		} else {
-			out := string(cmdOut)
-			unicorns, err := strconv.ParseUint(strings.TrimSpace(out), 10, 64)
-			checkFatal(err)
-			// remove the master from the total running unicorns
-			tc.Count = unicorns - 1
-		}
-	} else {
-		workers, err := strconv.ParseUint(unicornWorkers, 10, 64)
-		checkFatal(err)
-		tc.Count = uint64(workers)
 	}
 }
 
@@ -187,7 +141,7 @@ func (r *raingutter) ScanSocketStats(s *SocketStats) raingutter {
 // according to what's specified in /etc/dd-agent/datadog.conf
 //
 // https://docs.datadoghq.com/guides/dogstatsd/
-func (r *raingutter) sendStats(c *statsd.Client, tc *totalConnections, useThreads bool) {
+func (r *raingutter) sendStats() {
 	// calling: int
 	// writing: int
 	//
@@ -196,37 +150,37 @@ func (r *raingutter) sendStats(c *statsd.Client, tc *totalConnections, useThread
 	// <UNIX or TCP SOCKET> queued: int
 
 	// calling - the number of application dispatchers on your machine
-	err := c.Histogram("calling", float64(r.Calling), nil, 1)
+	err := r.statsdClient.Histogram("calling", float64(r.Calling), nil, 1)
 	checkError(err)
 	// writing - the number of clients being written to on your machine
-	err = c.Histogram("writing", float64(r.Writing), nil, 1)
+	err = r.statsdClient.Histogram("writing", float64(r.Writing), nil, 1)
 	checkError(err)
 	// queued - total number of queued (pre-accept()) clients on that listener
-	err = c.Histogram("queued", float64(r.Queued), nil, 1)
+	err = r.statsdClient.Histogram("queued", float64(r.Queued), nil, 1)
 	checkError(err)
 	// active - total number of active clients on that listener
-	err = c.Histogram("active", float64(r.Active), nil, 1)
+	err = r.statsdClient.Histogram("active", float64(r.Active), nil, 1)
 	checkError(err)
-	if useThreads {
+	if r.useThreads {
 		// threads.count - total number of allowed threads
-		err = c.Histogram("threads.count", float64(tc.Count), nil, 1)
+		err = r.statsdClient.Histogram("threads.count", float64(r.workerCount), nil, 1)
 		checkError(err)
 	} else {
 		// worker.count - total number of provisioned workers
-		err = c.Histogram("worker.count", float64(tc.Count), nil, 1)
+		err = r.statsdClient.Histogram("worker.count", float64(r.workerCount), nil, 1)
 		checkError(err)
 	}
 }
 
-func (r *raingutter) logMetrics(tc *totalConnections, raindropsURL string) {
+func (r *raingutter) logMetrics() {
 	contextLogger := log.WithFields(log.Fields{
 		"active":  r.Active,
 		"queued":  r.Queued,
 		"writing": r.Writing,
 		"calling": r.Calling,
-		"workers": tc.Count,
+		"workers": r.workerCount,
 	})
-	contextLogger.Info(raindropsURL)
+	contextLogger.Info(r.raindropsURL)
 }
 
 func main() {
@@ -264,7 +218,7 @@ func main() {
 		socketStatsMode = "proc_net"
 	}
 	if socketStatsMode != "netlink" && socketStatsMode != "proc_net" && socketStatsMode != "raindrops" {
-		log.Fatalf("Invalid value for RG_NET_POLL_MODE %s (should be netlink, proc_net, or raindrops)", socketStatsMode)
+		log.Fatalf("Invalid value for RG_SOCKET_STATS_MODE %s (should be netlink, proc_net, or raindrops)", socketStatsMode)
 	}
 	log.Info("RG_SOCKET_STATS_MODE: ", socketStatsMode)
 
@@ -342,8 +296,22 @@ func main() {
 	if frequency == "" {
 		frequency = "500"
 	}
-	log.Info("RG_FREQUENCY: ", frequency)
-	freqInt, _ := strconv.Atoi(frequency)
+	freqInt, err := strconv.Atoi(frequency)
+	if err != nil {
+		log.Fatalf("Could not parse RG_FREQUENCY %s: %s", frequency, err)
+	}
+	log.Info("RG_FREQUENCY: ", freqInt)
+
+	workerFrequencyStr := os.Getenv("RG_FREQUENCY_WORKER")
+	if frequency == "" {
+		frequency = "60000" // The old default for pgrep'ing.
+	}
+	workerFrequencyInt, err := strconv.Atoi(workerFrequencyStr)
+	if err != nil {
+		log.Fatalf("Could not parse RG_FREQUENCY_WORKER %s: %s", workerFrequencyStr, err)
+	}
+	log.Info("RG_FREQUENCY_WORKER: ", workerFrequencyInt)
+
 
 	memoryStatsEnabledStr := os.Getenv("RG_MEMORY_STATS_ENABLED")
 	memoryStatsEnabled := false
@@ -373,6 +341,40 @@ func main() {
 	r.prometheusEnabled = prometheusEnabled == "true"
 	r.logMetricsEnabled = logMetricsEnabled == "true"
 	r.useThreads = useThreads == "true"
+
+	if r.useThreads {
+		threadCountStr := os.Getenv("MAX_THREADS")
+		if threadCountStr != "" {
+			r.staticWorkerCount, err = strconv.Atoi(threadCountStr)
+			if err != nil {
+				log.Fatalf("Could not parse MAX_THREADS %s: %s", threadCountStr, err)
+			}
+			log.Infof("MAX_THREADS: %d", r.staticWorkerCount)
+		}
+	} else {
+		unicornWorkerStr := os.Getenv("UNICORN_WORKERS")
+		if unicornWorkerStr != "" {
+			r.staticWorkerCount, err = strconv.Atoi(unicornWorkerStr)
+			if err != nil {
+				log.Fatalf("Could not parse UNICORN_WORKERS %s: %s", unicornWorkerStr, err)
+			}
+			log.Infof("UNICORN_WORKERS: %d", r.staticWorkerCount)
+		}
+	}
+
+	r.workerCountMode = os.Getenv("RG_WORKER_COUNT_MODE")
+	if r.workerCountMode == "" {
+		// For backwards compatability, the default mode is socket_inode if MAX_THREADS
+		// or UNICORN_WORKERS is not specified
+		if r.staticWorkerCount == 0 {
+			r.workerCountMode = "socket_inode"
+		} else{
+			r.workerCountMode = "static"
+		}
+	}
+	if r.workerCountMode != "socket_inode" && r.workerCountMode != "static" {
+		log.Fatalf("Invalid value for RG_WORKER_COUNT_MODE %s (should be socket_inode or static)", r.workerCountMode)
+	}
 
 	// Create an http client
 	r.httpClient = &http.Client{
@@ -423,7 +425,7 @@ func main() {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 
-	workerMetricsTicker := time.NewTicker(60 * time.Second)
+	workerMetricsTicker := time.NewTicker(time.Duration(workerFrequencyInt) * time.Millisecond)
 	defer workerMetricsTicker.Stop()
 	socketMetricsTicker := time.NewTicker(time.Duration(freqInt) * time.Millisecond)
 	defer socketMetricsTicker.Stop()
@@ -480,33 +482,30 @@ func (r *raingutter) collectAndEmitSocketMetrics() {
 		}
 	}
 
-	if r.memoryStatsEnabled {
-		serverProcs, err := FindProcessesListeningToSocket(r.procDir, r.ListenerSocketInode)
-		if err != nil {
-			log.Error(err)
-		} else {
-			log.Infof("Found unicorn pids: master %+v, worker %+v", serverProcs.MasterPids, serverProcs.WorkerPids)
-			serverProcs.Close()
-		}
-	}
-
 	if didScan {
 		if r.statsdEnabled {
-			r.sendStats(r.statsdClient, &r.tc, r.useThreads)
+			r.sendStats()
 		}
 		if r.prometheusEnabled {
-			r.recordMetrics(&r.tc, r.useThreads)
+			r.recordMetrics()
 		}
 		if r.logMetricsEnabled {
-			r.logMetrics(&r.tc, r.raindropsURL)
+			r.logMetrics()
 		}
 	}
 }
 
 func (r *raingutter) collectAndEmitWorkerMetrics() {
-	if r.useThreads {
-		getThreads(&r.tc)
-	} else {
-		getWorkers(&r.tc)
+	switch r.workerCountMode {
+	case "static":
+		r.workerCount = r.staticWorkerCount
+	case "socket_inode":
+		serverProcs, err := FindProcessesListeningToSocket(r.procDir, r.ListenerSocketInode)
+		if err != nil {
+			log.Error(err)
+			return
+		}
+		defer serverProcs.Close()
+		r.workerCount = len(serverProcs.WorkerPids)
 	}
 }

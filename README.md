@@ -39,7 +39,11 @@ The following environment variables can be used to configure Raingutter:
     * `netlink` - reads stats from a `NETLINK_SOCK_DIAG` netlink socket.
     * `raindrops` - parse stats from the raindrops URL (must set `RG_RAINDROPS_URL`)
 * `RG_USE_SOCKET_STATS`: Deprecated - use `RG_SOCKET_STATS_MODE` instead. If set to `true`, will behave like `RG_SOCKET_STATS_MODE == "proc_net"`, and if set to `false` will behave like `RG_SOCKET_STATS_MODE == "raindrops"`.
-* `RG_FREQUENCY`: Polling frequency in milliseconds (default: `500`)
+* `RG_WORKER_COUNT_MODE`: How the worker count will be computed. Set to one of:
+    * `static` - Raingutter will simply emit a static number (either `UNICORN_WORKERS` or `MAX_THREADS`). This is the default if either of these values are set.
+    * `socket_inode` - Raingutter will find processes listening on the same listener socket from `RG_SERVER_PORT`, and count them as workers if they are the child of another listening process. Works well for a preforking webserver like Unicorn, but should work with other preforking web servers too. This is the default if `UNICORN_WORKERS` or `MAX_THREADS` are not set.
+* `RG_FREQUENCY`: Polling frequency in milliseconds for the high-frequency socket stats (default: `500`)
+* `RG_FREQUENCY_WORKER`: Polling frequency in milliseconds for the lower-frequency & more expensive stats that are collected, like the number of workers & their memory usage (default: `60000`)
 * `RG_SERVER_PORT`: Where the web server listens to
 * `RG_MEMORY_STATS_ENABLED`: If enabled, attempt to collect memory usage statistics for processers listening on `RG_SERVER_PORT`. This is most useful for preforking webservers like unicorn, where it will measure how much memory is copy-on-write shared between processes. If using this feature, you should NOT use `RG_SOCKET_STATS_MODE=netlink` - Raingutter relies on lining up the listener socket inode numbers with `/proc/$pid/fd/` to find out which processes are listening on a socket. The inode is stored in the kernel as a 64-bit integer, however the INET_DIAG netlink API only exposes it as a 32-bit integer, doing silent wrap around! This means that if you use `RG_SOCKET_STATS_MODE=netlink`, `RG_MEMORY_STATS_ENABLED` might simply fail to generate any metrics at all if your system has had a lot of sockets.
 * `RG_PROC_DIRECTORY`: Path to `/proc` directory to use. Useful when running in a container to point to a path where the host's `/proc` directory is mounted.
