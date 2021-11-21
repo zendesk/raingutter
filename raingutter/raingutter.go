@@ -577,7 +577,7 @@ func (r *raingutter) collectAndEmitWorkerMetrics() {
 		}
 		r.workerCount = r.serverProcesses.workerCount()
 		if r.memoryStatsEnabled {
-			r.serverProcesses.collectMemoryStats(r.procDir, r.hasCapSysAdmin)
+			r.serverProcesses.collectMemoryStats(r.hasCapSysAdmin)
 		}
 	}
 

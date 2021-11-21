@@ -7,9 +7,9 @@ import (
 	"os"
 	"path"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -318,174 +318,169 @@ func (c *ServerProcessCollection) workerCount() int {
 	return ct
 }
 
-func (c *ServerProcessCollection) collectMemoryStats(procDir string, hasCapSysAdmin bool) {
-	for _, proc := range c.Processes {
-		func() {
-			mappingsFD, err := unix.Openat(int(proc.ProcDirFD.Fd()), "smaps", unix.O_RDONLY, 0)
-			if err != nil {
-				return
-			}
-			mappingsFile := os.NewFile(uintptr(mappingsFD), "smaps")
-			defer mappingsFile.Close()
+func (c *ServerProcessCollection) collectMemoryStats(hasCapSysAdmin bool) {
+	t1 := time.Now()
 
-			// Parsing /proc/$pid/smaps is a real PITA.
-			smapsScanner := bufio.NewScanner(mappingsFile)
-			smapsScanner.Split(bufio.ScanLines)
+	// Keep a map of Pid -> kpfn -> count
+	// We will go back and see how many kernel pages are _uniquely_ resident for each process.
+	procKpfnCounts := map[int]map[uint64]int{}
+	var procKpfnCountLock sync.Mutex
 
-			type mappingT struct {
-				startAddr uint64
-				endAddr   uint64
-				anonBytes uint64
-				rssBytes  uint64
-				pssBytes  uint64
-			}
-			var mappings []*mappingT
-			var thisMapping *mappingT
-			for smapsScanner.Scan() {
-				line := smapsScanner.Text()
-				if m := newMappingRegexp.FindStringSubmatch(line); m != nil {
-					thisMapping = &mappingT{}
-					thisMapping.startAddr, err = strconv.ParseUint(m[1], 16, 64)
-					if err != nil {
-						log.Warnf("failed to parse /proc/%d/smaps: line %s", proc.Pid, line)
-						return
-					}
-					thisMapping.endAddr, err = strconv.ParseUint(m[2], 16, 64)
-					if err != nil {
-						log.Warnf("failed to parse /proc/%d/smaps: line %s", proc.Pid, line)
-						return
-					}
-					if !vSyscallRegexp.MatchString(line) {
-						mappings = append(mappings, thisMapping)
-					}
-				} else if m := anonymousRegexp.FindStringSubmatch(line); m != nil {
-					anonKb, err := strconv.ParseUint(m[1], 10, 64)
-					if err != nil {
-						log.Warnf("failed to parse /proc/%d/smaps: line %s", proc.Pid, line)
-						return
-					}
-					thisMapping.anonBytes = anonKb * 1024
-				} else if m := rssRegexp.FindStringSubmatch(line); m != nil {
-					rssKb, err := strconv.ParseUint(m[1], 10, 64)
-					if err != nil {
-						log.Warnf("failed to parse /proc/%d/smaps: line %s", proc.Pid, line)
-						return
-					}
-					thisMapping.rssBytes = rssKb * 1024
-				} else if m := pssRegexp.FindStringSubmatch(line); m != nil {
-					pssKb, err := strconv.ParseUint(m[1], 10, 64)
-					if err != nil {
-						log.Warnf("failed to parse /proc/%d/smaps: line %s", proc.Pid, line)
-						return
-					}
-					thisMapping.pssBytes = pssKb * 1024
-				}
-			}
+	computeProcessMemoryFunc := func(proc *ServerProcess) {
+		mappingsFD, err := unix.Openat(int(proc.ProcDirFD.Fd()), "smaps", unix.O_RDONLY, 0)
+		if err != nil {
+			return
+		}
+		mappingsFile := os.NewFile(uintptr(mappingsFD), "smaps")
+		defer mappingsFile.Close()
 
-			// For each mapping, read the info out of /proc/$pid/pagemap
-			pagemapFD, err := unix.Openat(int(proc.ProcDirFD.Fd()), "pagemap", unix.O_RDONLY, 0)
-			if err != nil {
-				return
-			}
-			pagemapFile := os.NewFile(uintptr(pagemapFD), "pagemap")
-			defer pagemapFile.Close()
+		// Parsing /proc/$pid/smaps is a real PITA.
+		smapsScanner := bufio.NewScanner(mappingsFile)
+		smapsScanner.Split(bufio.ScanLines)
 
-			if hasCapSysAdmin {
-				// Set of kernel page frame numbers for every mapping we have, along with how many
-				// times it's been mapped.
-				residentKernelPfnCounts := map[uint64]int{}
-				var residentKernelPfns []int
-				for _, mapping := range mappings {
-					startUserPfn := mapping.startAddr / uint64(os.Getpagesize())
-					endUserPfn := mapping.endAddr / uint64(os.Getpagesize())
-					buffer := make([]byte, (endUserPfn-startUserPfn)*8)
-					_, err = pagemapFile.Seek(int64(startUserPfn*8), 0)
-					if err != nil {
-						return
-					}
-					n, err := pagemapFile.Read(buffer)
-					if err != nil || n != len(buffer) {
-						return
-					}
-					for i := 0; i < len(buffer); i += 8 {
-						userPfnInfo := native_endian.NativeEndian().Uint64(buffer[i : i+8])
-
-						isResident := (userPfnInfo & (0x1 << 63)) != 0
-						// Kernel PFN data is in bits 0-53
-						kernelPfn := userPfnInfo & ((0x1 << 53) - 1)
-						if isResident && kernelPfn != 0 {
-							// Put the pfn in the residentKernelPfns array once
-							if residentKernelPfnCounts[kernelPfn] == 0 {
-								residentKernelPfns = append(residentKernelPfns, int(kernelPfn))
-							}
-							// but keep a counter of how many times this page is mapped too
-							residentKernelPfnCounts[kernelPfn] += 1
-						}
-					}
-				}
-
-				// Sort the kpfns into ranges
-				sort.Ints(residentKernelPfns)
-				type kpfnRange struct {
-					start  int
-					length int
-				}
-				var kpfnRanges []*kpfnRange
-				thisKpfnRange := &kpfnRange{0, 0}
-				for _, kpfn := range residentKernelPfns {
-					if thisKpfnRange.start+thisKpfnRange.length < kpfn {
-						thisKpfnRange = &kpfnRange{
-							start:  kpfn,
-							length: 1,
-						}
-						kpfnRanges = append(kpfnRanges, thisKpfnRange)
-					} else {
-						thisKpfnRange.length += 1
-					}
-				}
-
-				kpageCountFile, err := os.OpenFile(path.Join(procDir, "kpagecount"), os.O_RDONLY, 0)
+		type mappingT struct {
+			startAddr uint64
+			endAddr   uint64
+			anonBytes uint64
+			rssBytes  uint64
+			pssBytes  uint64
+		}
+		var mappings []*mappingT
+		var thisMapping *mappingT
+		for smapsScanner.Scan() {
+			line := smapsScanner.Text()
+			if m := newMappingRegexp.FindStringSubmatch(line); m != nil {
+				thisMapping = &mappingT{}
+				thisMapping.startAddr, err = strconv.ParseUint(m[1], 16, 64)
 				if err != nil {
-					// _this_ is unexpected
-					log.Errorf("failed to open %s: %s", path.Join(procDir, "kpagecount"), err)
+					log.Warnf("failed to parse /proc/%d/smaps: line %s", proc.Pid, line)
 					return
 				}
-				defer kpageCountFile.Close()
+				thisMapping.endAddr, err = strconv.ParseUint(m[2], 16, 64)
+				if err != nil {
+					log.Warnf("failed to parse /proc/%d/smaps: line %s", proc.Pid, line)
+					return
+				}
+				if !vSyscallRegexp.MatchString(line) {
+					mappings = append(mappings, thisMapping)
+				}
+			} else if m := anonymousRegexp.FindStringSubmatch(line); m != nil {
+				anonKb, err := strconv.ParseUint(m[1], 10, 64)
+				if err != nil {
+					log.Warnf("failed to parse /proc/%d/smaps: line %s", proc.Pid, line)
+					return
+				}
+				thisMapping.anonBytes = anonKb * 1024
+			} else if m := rssRegexp.FindStringSubmatch(line); m != nil {
+				rssKb, err := strconv.ParseUint(m[1], 10, 64)
+				if err != nil {
+					log.Warnf("failed to parse /proc/%d/smaps: line %s", proc.Pid, line)
+					return
+				}
+				thisMapping.rssBytes = rssKb * 1024
+			} else if m := pssRegexp.FindStringSubmatch(line); m != nil {
+				pssKb, err := strconv.ParseUint(m[1], 10, 64)
+				if err != nil {
+					log.Warnf("failed to parse /proc/%d/smaps: line %s", proc.Pid, line)
+					return
+				}
+				thisMapping.pssBytes = pssKb * 1024
+			}
+		}
 
-				// Now look up all the mappings in /proc/kpagecount, and see if some _other_ process that's
-				// not this one was _also_ contributing to the mapping count.
-				proc.USS = 0
-				for _, kpfnRange := range kpfnRanges {
-					_, err := kpageCountFile.Seek(int64(kpfnRange.start*8), 0)
-					if err != nil {
-						continue
-					}
-					buffer := make([]byte, kpfnRange.length*8)
-					n, err := kpageCountFile.Read(buffer)
-					if err != nil || n != len(buffer) {
-						continue
-					}
-					for i := 0; i < len(buffer); i += 8 {
-						timesPageMapped := native_endian.NativeEndian().Uint64(buffer[i : i+8])
-						kpfnNumber := uint64(kpfnRange.start + (i / 8))
-						if int(timesPageMapped) <= residentKernelPfnCounts[kpfnNumber] {
-							// This page must only be mapped in this process, so it contributes to
-							// unique-set-size.
-							proc.USS += os.Getpagesize()
-						}
+		// For each mapping, read the info out of /proc/$pid/pagemap
+		pagemapFD, err := unix.Openat(int(proc.ProcDirFD.Fd()), "pagemap", unix.O_RDONLY, 0)
+		if err != nil {
+			return
+		}
+		pagemapFile := os.NewFile(uintptr(pagemapFD), "pagemap")
+		defer pagemapFile.Close()
+
+		if hasCapSysAdmin {
+			// Set of kernel page frame numbers for every mapping we have, along with how many
+			// times it's been mapped.
+			residentKernelPfnCounts := map[uint64]int{}
+			procKpfnCountLock.Lock()
+			procKpfnCounts[proc.Pid] = residentKernelPfnCounts
+			procKpfnCountLock.Unlock()
+			for _, mapping := range mappings {
+				startUserPfn := mapping.startAddr / uint64(os.Getpagesize())
+				endUserPfn := mapping.endAddr / uint64(os.Getpagesize())
+				buffer := make([]byte, (endUserPfn-startUserPfn)*8)
+				_, err = pagemapFile.Seek(int64(startUserPfn*8), 0)
+				if err != nil {
+					return
+				}
+				n, err := pagemapFile.Read(buffer)
+				if err != nil || n != len(buffer) {
+					return
+				}
+				for i := 0; i < len(buffer); i += 8 {
+					userPfnInfo := native_endian.NativeEndian().Uint64(buffer[i : i+8])
+
+					isResident := (userPfnInfo & (0x1 << 63)) != 0
+					// Kernel PFN data is in bits 0-53
+					kernelPfn := userPfnInfo & ((0x1 << 53) - 1)
+					if isResident && kernelPfn != 0 {
+						// keep a counter of how many times this page is mapped too
+						residentKernelPfnCounts[kernelPfn] += 1
 					}
 				}
 			}
+		}
 
-			// Sum up values over all pages
-			proc.RSS = 0
-			proc.PSS = 0
-			proc.Anon = 0
-			for _, mapping := range mappings {
-				proc.RSS += int(mapping.rssBytes)
-				proc.PSS += int(mapping.pssBytes)
-				proc.Anon += int(mapping.anonBytes)
+		// Sum up values over all pages
+		proc.RSS = 0
+		proc.PSS = 0
+		proc.Anon = 0
+		for _, mapping := range mappings {
+			proc.RSS += int(mapping.rssBytes)
+			proc.PSS += int(mapping.pssBytes)
+			proc.Anon += int(mapping.anonBytes)
+		}
+	}
+
+	// Scan through each process in parallel (8-at-a-time).
+	processChan := make(chan *ServerProcess)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for proc := range processChan {
+				computeProcessMemoryFunc(proc)
 			}
 		}()
 	}
+	for _, proc := range c.Processes {
+		processChan <- proc
+	}
+	close(processChan)
+	wg.Wait()
+
+	// Now try and calculate the unique-set-size for each process - that is, how many pages are mapped in it
+	// and resident that are _not_ resident in any other process.
+	// We could use /proc/kpagecount to look at the global count of how often each page is mapped, but it's
+	// not terribly efficient, and what we're really concerned about is how much memory is being shared _between_
+	// worker processes, rather than analyzing the very unlikely chance that a worker has some memory resident
+	// that is used by some other unrelated process on the system.
+	totalKpfnMappingCounts := map[uint64]int{}
+	for _, kpfnMappingCounts := range procKpfnCounts {
+		for kpfn, mappingCount := range kpfnMappingCounts {
+			totalKpfnMappingCounts[kpfn] += mappingCount
+		}
+	}
+
+	for _, proc := range c.Processes {
+		proc.USS = 0
+		for kpfn, mappingCount := range procKpfnCounts[proc.Pid] {
+			if totalKpfnMappingCounts[kpfn] <= mappingCount {
+				// Uniquely in this process.
+				proc.USS += os.Getpagesize()
+			}
+		}
+	}
+
+	t2 := time.Now()
+	log.Infof("proc memscanning took %s", t2.Sub(t1).String())
 }
