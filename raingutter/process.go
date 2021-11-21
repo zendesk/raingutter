@@ -7,11 +7,14 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/yalue/native_endian"
 	"golang.org/x/sys/unix"
 )
 
@@ -22,6 +25,8 @@ type ServerProcessCollection struct {
 type ServerProcess struct {
 	Pid       int
 	ProcDirFD *os.File
+	UID       int
+	GID       int
 
 	// Identity
 	IsMaster bool
@@ -30,6 +35,7 @@ type ServerProcess struct {
 	// Memory stats
 	RSS  int
 	PSS  int
+	USS  int
 	Anon int
 }
 
@@ -290,6 +296,15 @@ func (c *ServerProcessCollection) computeParentChildRelations(procDir string) {
 		} else {
 			proc.IsMaster = true
 		}
+
+		// Read & save the UID/GID of the program - we need this later for memory stats.
+		var statData unix.Stat_t
+		err = unix.Fstat(int(proc.ProcDirFD.Fd()), &statData)
+		if err != nil {
+			continue
+		}
+		proc.UID = int(statData.Uid)
+		proc.GID = int(statData.Gid)
 	}
 }
 
@@ -303,7 +318,7 @@ func (c *ServerProcessCollection) workerCount() int {
 	return ct
 }
 
-func (c *ServerProcessCollection) collectMemoryStats() {
+func (c *ServerProcessCollection) collectMemoryStats(procDir string, hasCapSysAdmin bool) {
 	for _, proc := range c.Processes {
 		func() {
 			mappingsFD, err := unix.Openat(int(proc.ProcDirFD.Fd()), "smaps", unix.O_RDONLY, 0)
@@ -364,6 +379,101 @@ func (c *ServerProcessCollection) collectMemoryStats() {
 						return
 					}
 					thisMapping.pssBytes = pssKb * 1024
+				}
+			}
+
+			// For each mapping, read the info out of /proc/$pid/pagemap
+			pagemapFD, err := unix.Openat(int(proc.ProcDirFD.Fd()), "pagemap", unix.O_RDONLY, 0)
+			if err != nil {
+				return
+			}
+			pagemapFile := os.NewFile(uintptr(pagemapFD), "pagemap")
+			defer pagemapFile.Close()
+
+			if hasCapSysAdmin {
+				// Set of kernel page frame numbers for every mapping we have, along with how many
+				// times it's been mapped.
+				residentKernelPfnCounts := map[uint64]int{}
+				var residentKernelPfns []int
+				for _, mapping := range mappings {
+					startUserPfn := mapping.startAddr / uint64(os.Getpagesize())
+					endUserPfn := mapping.endAddr / uint64(os.Getpagesize())
+					buffer := make([]byte, (endUserPfn-startUserPfn)*8)
+					_, err = pagemapFile.Seek(int64(startUserPfn*8), 0)
+					if err != nil {
+						return
+					}
+					n, err := pagemapFile.Read(buffer)
+					if err != nil || n != len(buffer) {
+						return
+					}
+					for i := 0; i < len(buffer); i += 8 {
+						userPfnInfo := native_endian.NativeEndian().Uint64(buffer[i : i+8])
+
+						isResident := (userPfnInfo & (0x1 << 63)) != 0
+						// Kernel PFN data is in bits 0-53
+						kernelPfn := userPfnInfo & ((0x1 << 53) - 1)
+						if isResident && kernelPfn != 0 {
+							// Put the pfn in the residentKernelPfns array once
+							if residentKernelPfnCounts[kernelPfn] == 0 {
+								residentKernelPfns = append(residentKernelPfns, int(kernelPfn))
+							}
+							// but keep a counter of how many times this page is mapped too
+							residentKernelPfnCounts[kernelPfn] += 1
+						}
+					}
+				}
+
+				// Sort the kpfns into ranges
+				sort.Ints(residentKernelPfns)
+				type kpfnRange struct {
+					start  int
+					length int
+				}
+				var kpfnRanges []*kpfnRange
+				thisKpfnRange := &kpfnRange{0, 0}
+				for _, kpfn := range residentKernelPfns {
+					if thisKpfnRange.start+thisKpfnRange.length < kpfn {
+						thisKpfnRange = &kpfnRange{
+							start:  kpfn,
+							length: 1,
+						}
+						kpfnRanges = append(kpfnRanges, thisKpfnRange)
+					} else {
+						thisKpfnRange.length += 1
+					}
+				}
+
+				kpageCountFile, err := os.OpenFile(path.Join(procDir, "kpagecount"), os.O_RDONLY, 0)
+				if err != nil {
+					// _this_ is unexpected
+					log.Errorf("failed to open %s: %s", path.Join(procDir, "kpagecount"), err)
+					return
+				}
+				defer kpageCountFile.Close()
+
+				// Now look up all the mappings in /proc/kpagecount, and see if some _other_ process that's
+				// not this one was _also_ contributing to the mapping count.
+				proc.USS = 0
+				for _, kpfnRange := range kpfnRanges {
+					_, err := kpageCountFile.Seek(int64(kpfnRange.start*8), 0)
+					if err != nil {
+						continue
+					}
+					buffer := make([]byte, kpfnRange.length*8)
+					n, err := kpageCountFile.Read(buffer)
+					if err != nil || n != len(buffer) {
+						continue
+					}
+					for i := 0; i < len(buffer); i += 8 {
+						timesPageMapped := native_endian.NativeEndian().Uint64(buffer[i : i+8])
+						kpfnNumber := uint64(kpfnRange.start + (i / 8))
+						if int(timesPageMapped) <= residentKernelPfnCounts[kpfnNumber] {
+							// This page must only be mapped in this process, so it contributes to
+							// unique-set-size.
+							proc.USS += os.Getpagesize()
+						}
+					}
 				}
 			}
 

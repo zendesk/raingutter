@@ -14,6 +14,7 @@ import (
 
 	"github.com/DataDog/datadog-go/statsd"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 )
 
 var (
@@ -48,6 +49,7 @@ type raingutter struct {
 	useThreads         bool
 	staticWorkerCount  int
 	workerCountMode    string
+	hasCapSysAdmin     bool
 }
 
 type status struct {
@@ -194,6 +196,13 @@ func (r *raingutter) sendWorkerStats() {
 				checkError(err)
 				err = r.statsdClient.Distribution("process.anon", float64(proc.Anon), tags, 1)
 				checkError(err)
+				// Don't emit USS for the master if there is not also a worker - otherwise this metric
+				// is very misleading; there can't _be_ any copy-on-write page sharing if the master has
+				// not yet forked.
+				if r.serverProcesses.workerCount() > 0 {
+					err = r.statsdClient.Distribution("process.uss", float64(proc.USS), tags, 1)
+					checkError(err)
+				}
 			}
 		}
 	}
@@ -409,6 +418,24 @@ func main() {
 		log.Fatalf("Invalid value for RG_WORKER_COUNT_MODE %s (should be socket_inode or static)", r.workerCountMode)
 	}
 
+	if r.memoryStatsEnabled {
+		var capHeader unix.CapUserHeader
+		// Set v1, to get only 32-bit capabilities, because the interface for fetching capabilities as a 64-bit
+		// number is a huge pain, and we only need to fetch CAP_SYS_ADMIN
+		capHeader.Version = unix.LINUX_CAPABILITY_VERSION_1
+		var capData unix.CapUserData
+		err = unix.Capget(&capHeader, &capData)
+		if err != nil {
+			log.Fatalf("error reading process capabilities: %w", err)
+		}
+		r.hasCapSysAdmin = (capData.Effective & (1 << unix.CAP_SYS_ADMIN)) != 0
+
+		if !r.hasCapSysAdmin {
+			log.Warn("RG_MEMORY_STATS_ENABLED specified, but not running with CAP_SYS_ADMIN. " +
+				"Will not be able to collect some page-sharing information.")
+		}
+	}
+
 	// Create an http client
 	r.httpClient = &http.Client{
 		Timeout: 3 * time.Second,
@@ -550,7 +577,7 @@ func (r *raingutter) collectAndEmitWorkerMetrics() {
 		}
 		r.workerCount = r.serverProcesses.workerCount()
 		if r.memoryStatsEnabled {
-			r.serverProcesses.collectMemoryStats()
+			r.serverProcesses.collectMemoryStats(r.procDir, r.hasCapSysAdmin)
 		}
 	}
 
