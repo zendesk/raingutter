@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"io/ioutil"
+	"path"
 	"strconv"
 	"strings"
 
@@ -12,15 +13,16 @@ import (
 )
 
 type SocketStats struct {
-	QueueSize     float64
-	ActiveWorkers float64
+	QueueSize     uint64
+	ActiveWorkers uint64
+	ListenerInode uint64
 }
 
 type Socket struct {
-	LocalPort int64
+	LocalPort uint16
 	ConnState string
 	Inode     string
-	QueueSize float64
+	QueueSize uint64
 }
 
 // strip out the `sl local_address remote_address...` menu and trailing whitespace
@@ -34,14 +36,14 @@ func stripMenu(s string) string {
 }
 
 // GetSocketStats combines the tcp and tcp6 /proc/net files to get a list of all ipv4 and ipv6 sockets
-func GetSocketStats() (string, error) {
-	s6, err := ioutil.ReadFile("/proc/net/tcp6")
+func GetSocketStats(procDir string) (string, error) {
+	s6, err := ioutil.ReadFile(path.Join(procDir, "net/tcp6"))
 	if err != nil {
 		return "", err
 	}
 	ipv6sockets := stripMenu(string(s6))
 
-	s4, err := ioutil.ReadFile("/proc/net/tcp")
+	s4, err := ioutil.ReadFile(path.Join(procDir, "net/tcp"))
 	if err != nil {
 		return "", err
 	}
@@ -66,7 +68,7 @@ func ParseSocket(s string) (Socket, error) {
 	if len(lp) < 2 {
 		return Socket{}, errors.New("could not parse socket local address: " + localAddr)
 	}
-	localPort, err := strconv.ParseInt(lp[1], 16, 0)
+	localPort, err := strconv.ParseUint(lp[1], 16, 16)
 	if err != nil {
 		return Socket{}, err
 	}
@@ -94,21 +96,14 @@ func ParseSocket(s string) (Socket, error) {
 		return Socket{}, err
 	}
 
-	return Socket{localPort, connState, inode, float64(queueSize)}, nil
+	return Socket{uint16(localPort), connState, inode, uint64(queueSize)}, nil
 
 }
 
-// TODO: investigate porting the Raindrops C implementation, which uses netlink for
-// a significantly more performant socket check
-// https://github.com/tmm1/raindrops/blob/1c18fd9c13f95fef6bcbdc0587d38886fa8e9064/ext/raindrops/linux_inet_diag.c#L295
-func ParseSocketStats(serverPort string, ssOutput string) (*SocketStats, error) {
-	port, err := strconv.Atoi(serverPort)
-	if err != nil {
-		return nil, err
-	}
-
-	var queueSize float64
-	var activeWorkers float64
+func ParseSocketStats(port uint16, ssOutput string) (*SocketStats, error) {
+	var queueSize uint64
+	var activeWorkers uint64
+	var listenerInode uint64
 
 	sockets := strings.Split(ssOutput, "\n")
 	for _, s := range sockets {
@@ -125,7 +120,7 @@ func ParseSocketStats(serverPort string, ssOutput string) (*SocketStats, error) 
 		// we only want sockets on our port (to filter for Unicorn sockets)
 		// we also ignore TIME-WAIT sockets - they've been handed off to the kernel
 		// to sit on ice, Unicorn no longer cares
-		if int(socket.LocalPort) != port || socket.ConnState == "TIME-WAIT" {
+		if socket.LocalPort != port || socket.ConnState == "TIME-WAIT" {
 			continue
 		}
 
@@ -133,6 +128,10 @@ func ParseSocketStats(serverPort string, ssOutput string) (*SocketStats, error) 
 		// at the Recv-Q size as a measure of queue depth
 		if socket.ConnState == "LISTEN" {
 			queueSize = socket.QueueSize
+			listenerInodeVal, err := strconv.ParseUint(socket.Inode, 10, 64)
+			if err == nil {
+				listenerInode = listenerInodeVal
+			}
 		}
 
 		// sockets in the ESTAB state are short-lived sockets that represent a request
@@ -146,5 +145,5 @@ func ParseSocketStats(serverPort string, ssOutput string) (*SocketStats, error) 
 		}
 	}
 
-	return &SocketStats{queueSize, activeWorkers}, nil
+	return &SocketStats{queueSize, activeWorkers, listenerInode}, nil
 }

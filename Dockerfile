@@ -7,7 +7,12 @@ ENV GOPATH /go
 WORKDIR /go/src/github.com/zendesk/raingutter
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -a -mod=vendor -ldflags "-X main.version=${version}" -o /raingutter raingutter/raingutter.go raingutter/socket_stats.go raingutter/prometheus.go
+RUN CGO_ENABLED=0 GOOS=linux go build -a -mod=vendor -ldflags "-X main.version=${version}" -o /raingutter \
+    raingutter/raingutter.go  \
+    raingutter/socket_stats.go \
+    raingutter/prometheus.go \
+    raingutter/netlink_socket_stats.go \
+    raingutter/process.go
 
 FROM scratch
 

@@ -38,13 +38,16 @@ var (
 		[]string{"pod_name", "project", "pod_namespace"})
 )
 
-func (r *raingutter) recordMetrics(tc *totalConnections, useThreads string) {
-	raingutterActive.WithLabelValues(podName, project, podNameSpace).Observe(r.Active)
-	raingutterQueued.WithLabelValues(podName, project, podNameSpace).Observe(r.Queued)
-	if useThreads == "true" {
-		raingutterThreads.WithLabelValues(podName, project, podNameSpace).Set(tc.Count)
+func (r *raingutter) recordSocketMetrics() {
+	raingutterActive.WithLabelValues(podName, project, podNameSpace).Observe(float64(r.Active))
+	raingutterQueued.WithLabelValues(podName, project, podNameSpace).Observe(float64(r.Queued))
+}
+
+func (r *raingutter) recordWorkerMetrics() {
+	if r.useThreads {
+		raingutterThreads.WithLabelValues(podName, project, podNameSpace).Set(float64(r.workerCount))
 	} else {
-		raingutterWorkers.WithLabelValues(podName, project, podNameSpace).Set(tc.Count)
+		raingutterWorkers.WithLabelValues(podName, project, podNameSpace).Set(float64(r.workerCount))
 	}
 }
 
