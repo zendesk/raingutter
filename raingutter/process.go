@@ -23,10 +23,11 @@ type ServerProcessCollection struct {
 }
 
 type ServerProcess struct {
-	Pid       int
-	ProcDirFD *os.File
-	UID       int
-	GID       int
+	Pid         int
+	ProcDirFD   *os.File
+	RaindropsFD *os.File
+	UID         int
+	GID         int
 
 	// Identity
 	IsMaster bool
@@ -37,6 +38,9 @@ type ServerProcess struct {
 	PSS  int
 	USS  int
 	Anon int
+
+	// From raindrops
+	TotalAllocatedObjects uint
 }
 
 // linuxDirent64 is linux_dirent64 from linux/dirent.h
@@ -55,7 +59,7 @@ var anonymousRegexp = regexp.MustCompile(`^Anonymous:\s*([0-9]+)`)
 var rssRegexp = regexp.MustCompile(`^Rss:\s*([0-9]+)`)
 var pssRegexp = regexp.MustCompile(`^Pss:\s*([0-9]+)`)
 
-func FindProcessesListeningToSocket(procDir string, socketInode uint64) (result *ServerProcessCollection, errret error) {
+func FindProcessesListeningToSocket(procDir string, socketInode uint64, raindropsMemfdName string) (result *ServerProcessCollection, errret error) {
 	// Check what network namespace _we_ are in.
 	selfNetNs, err := os.Readlink(path.Join(procDir, "self/ns/net"))
 	if err != nil {
@@ -76,6 +80,19 @@ func FindProcessesListeningToSocket(procDir string, socketInode uint64) (result 
 			result = nil
 		}
 	}()
+
+	// We need to skip ourselves, but because procDir is in a different PID namespace (the host), we can't
+	// simply compare with getpid(). Instead, readlink /proc/self and skip that one.
+	procSelfFD, err := os.OpenFile(path.Join(procDir, "self"), os.O_RDONLY|unix.O_DIRECTORY, 0)
+	if err != nil {
+		log.Fatalf("failed to open %s: %s", path.Join(procDir, "self"), err)
+	}
+	defer procSelfFD.Close()
+	var procSelfStatbuf unix.Stat_t
+	err = unix.Fstat(int(procSelfFD.Fd()), &procSelfStatbuf)
+	if err != nil {
+		log.Fatalf("failed to stat %s: %s", procSelfFD.Name(), err)
+	}
 
 	for _, entry := range procEntries {
 		// use an IIFE so that we can defer closing the directory FD.
@@ -99,6 +116,16 @@ func FindProcessesListeningToSocket(procDir string, socketInode uint64) (result 
 					dirFD.Close()
 				}
 			}()
+
+			var dirStatBuf unix.Stat_t
+			err = unix.Fstat(int(dirFD.Fd()), &dirStatBuf)
+			if err != nil {
+				return
+			}
+			if dirStatBuf.Ino == procSelfStatbuf.Ino {
+				// OK - this process is definitely us - skip it
+				return
+			}
 
 			// Is this process in the same namespace as us?
 			// format of this link is "net:[uint64 in base10]" so this buffer is always
@@ -126,11 +153,19 @@ func FindProcessesListeningToSocket(procDir string, socketInode uint64) (result 
 			defer unix.Close(fdDirFD)
 
 			pidHasListenerSocketOpened := false
+
+			var raindropsFD *os.File
+			defer func() {
+				if raindropsFD != nil && !keepPidDirFD {
+					raindropsFD.Close()
+				}
+			}()
+
 			// Gross-time. Golang has no binding for "read entries from a directory FD". This is important,
 			// because pids can be recycled, so doing something like os.Readdir("/proc/$pid/fd") is racey.
 			// Linux has the getdents64 syscall for this purpose; use the raw syscall API.
-			dentBuf := make([]byte, 4096)
 			for {
+				dentBuf := make([]byte, 4096)
 				nBytes, err := unix.Getdents(fdDirFD, dentBuf)
 				if err != nil {
 					return
@@ -155,14 +190,27 @@ func FindProcessesListeningToSocket(procDir string, socketInode uint64) (result 
 						pidHasListenerSocketOpened = true
 					}
 
+					// While we're looking through the process files, this is a good time to save the Raindrops file
+					// descriptor, if present - we can use this later to read out some stats directly out of shared
+					// memory.
+					if raindropsMemfdName != "" && err == nil {
+						if strings.HasPrefix(string(linkBuffer[:linkBytes]), fmt.Sprintf("/memfd:%s", raindropsMemfdName)) {
+							raindropsFDInt, err := unix.Openat(fdDirFD, fdFileName, unix.O_RDONLY, 0)
+							if err == nil {
+								raindropsFD = os.NewFile(uintptr(raindropsFDInt), fdFileName)
+							}
+						}
+					}
+
 					offset += int(dentStruct.DReclen)
 				}
 			}
 
 			if pidHasListenerSocketOpened {
 				result.Processes = append(result.Processes, &ServerProcess{
-					Pid:       pid,
-					ProcDirFD: dirFD,
+					Pid:         pid,
+					ProcDirFD:   dirFD,
+					RaindropsFD: raindropsFD,
 				})
 				keepPidDirFD = true
 			}
@@ -175,6 +223,9 @@ func FindProcessesListeningToSocket(procDir string, socketInode uint64) (result 
 func (c *ServerProcessCollection) Close() {
 	for _, proc := range c.Processes {
 		proc.ProcDirFD.Close()
+		if proc.RaindropsFD != nil {
+			proc.RaindropsFD.Close()
+		}
 	}
 }
 
@@ -438,6 +489,35 @@ func (c *ServerProcessCollection) collectMemoryStats(hasCapSysAdmin bool) {
 			proc.PSS += int(mapping.pssBytes)
 			proc.Anon += int(mapping.anonBytes)
 		}
+
+		// Try and read ruby-side GC information out of the Raindrops shared memory segment
+		// Technically we could read _only_ the unicorn master, but the code turns out neater if we just
+		// open each process's Raindrops memory separately. It's hardly the most expensive thing going on in here.
+		if proc.RaindropsFD != nil {
+			// n.b.: the number 32 here needs to be kept in sync with what's writing the raindrops stats.
+			offset := 0
+			numCounters := 32
+
+			// This number is Raindrops::SIZE, which on my laptop, is 64. There's an algorithm that tries to
+			// set this to the size of a cache line, if available. We could either replicate the algorithm here,
+			// or export Raindrops::SIZE out-of-band somehow in a different data structure
+			raindropSize := 64
+
+			sizeofInt := int(unsafe.Sizeof(int(0)))
+			if !proc.IsMaster {
+				offset = (proc.Index + 1) * numCounters * raindropSize
+			}
+			_, err = proc.RaindropsFD.Seek(int64(offset), 0)
+			if err != nil {
+				return
+			}
+			counters := make([]byte, raindropSize*numCounters)
+			n, err := proc.RaindropsFD.Read(counters)
+			if err != nil || n != len(counters) {
+				return
+			}
+			proc.TotalAllocatedObjects = unmarshalNativeUInt(counters[(0 * raindropSize):(0 + sizeofInt)])
+		}
 	}
 
 	// Scan through each process in parallel (8-at-a-time).
@@ -483,4 +563,15 @@ func (c *ServerProcessCollection) collectMemoryStats(hasCapSysAdmin bool) {
 
 	t2 := time.Now()
 	log.Infof("proc memscanning took %s", t2.Sub(t1).String())
+}
+
+func unmarshalNativeUInt(buf []byte) uint {
+	sizeofInt := int(unsafe.Sizeof(int(0)))
+	if sizeofInt == 8 {
+		return uint(native_endian.NativeEndian().Uint64(buf))
+	} else if sizeofInt == 4 {
+		return uint(native_endian.NativeEndian().Uint32(buf))
+	} else {
+		panic("what architecture is this?")
+	}
 }

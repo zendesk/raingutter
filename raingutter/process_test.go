@@ -30,7 +30,7 @@ func TestFindProcessesListeningToSocket_SingleListener(t *testing.T) {
 	defer l.Close()
 
 	// Find processes using that socket
-	procs, err := FindProcessesListeningToSocket("/proc", listenerInode)
+	procs, err := FindProcessesListeningToSocket("/proc", listenerInode, "")
 	if err != nil {
 		t.Fatalf("error FindProcessesListeningToSocket: %s", err)
 	}
@@ -65,7 +65,7 @@ func TestFindProcessesListeningToSocket_Forked(t *testing.T) {
 	// Wait for a bit until there is one master (us) and one worker (the child)
 	testPassed := false
 	for i := 0; i < 10; i++ {
-		procs, err := FindProcessesListeningToSocket("/proc", listenerInode)
+		procs, err := FindProcessesListeningToSocket("/proc", listenerInode, "")
 		if err != nil {
 			t.Fatalf("error FindProcessesListeningToSocket: %s", err)
 		}

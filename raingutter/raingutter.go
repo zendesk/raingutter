@@ -50,6 +50,7 @@ type raingutter struct {
 	staticWorkerCount  int
 	workerCountMode    string
 	hasCapSysAdmin     bool
+	raindropsMemfdName string
 }
 
 type status struct {
@@ -203,6 +204,8 @@ func (r *raingutter) sendWorkerStats() {
 					err = r.statsdClient.Distribution("process.uss", float64(proc.USS), tags, 1)
 					checkError(err)
 				}
+				err = r.statsdClient.Distribution("process.total_allocated_objects", float64(proc.TotalAllocatedObjects), tags, 1)
+				checkError(err)
 			}
 		}
 	}
@@ -436,6 +439,11 @@ func main() {
 		}
 	}
 
+	r.raindropsMemfdName = os.Getenv("RG_RAINDROPS_MEMFD_NAME")
+	if r.raindropsMemfdName != "" {
+		log.Info("RG_RAINDROPS_MEMFD_NAME: ", r.raindropsMemfdName)
+	}
+
 	// Create an http client
 	r.httpClient = &http.Client{
 		Timeout: 3 * time.Second,
@@ -570,7 +578,7 @@ func (r *raingutter) collectAndEmitWorkerMetrics() {
 			r.serverProcesses.Close()
 		}
 		var err error
-		r.serverProcesses, err = FindProcessesListeningToSocket(r.procDir, r.ListenerSocketInode)
+		r.serverProcesses, err = FindProcessesListeningToSocket(r.procDir, r.ListenerSocketInode, r.raindropsMemfdName)
 		if err != nil {
 			log.Error(err)
 			return
