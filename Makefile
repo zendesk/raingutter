@@ -9,12 +9,16 @@ DEBIAN_ARCH := "amd64"
 DEBIAN_VENDOR := "Zendesk"
 NAMESPACES := "unicorn-raindrops" "unicorn-socket-stats" "puma-socket-stats"
 
+ensure_deps:
+	go mod vendor
+	go mod tidy
+
 clean:
 	rm -f *.deb *.dsc *.tar.gz *.changes bin/raingutter
 
 build: clean
 	go test ./raingutter -v
-	GOOS=linux GOARCH=amd64 go build -ldflags="-X main.version=$(VERSION)" -a -mod=vendor -o bin/raingutter raingutter/raingutter.go raingutter/socket_stats.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -mod=vendor -ldflags "-X main.version=${version}" -o bin/raingutter raingutter/raingutter.go raingutter/socket_stats.go raingutter/prometheus.go
 
 systemd_pkg: build
 	fpm --input-type dir \

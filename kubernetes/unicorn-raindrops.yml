@@ -45,6 +45,8 @@ spec:
               value: 'true'
             - name: RG_FREQUENCY
               value: '5000'
+            - name: RG_STATSD_EXTRA_TAGS
+              value: 'extratag1:1,extratag2:2'
           securityContext:
             runAsNonRoot: true
             readOnlyRootFilesystem: true
