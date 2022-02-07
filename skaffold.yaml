@@ -11,13 +11,13 @@ build:
         buildArgs:
           version: "161"
     - image: mock-raindrops
-      context: ./misc/
+      context: ./misc/raindrops/
       docker:
-        dockerfile: Dockerfile-raindrops.ms
+        dockerfile: Dockerfile.ms
     - image: mock-dogstatsd
-      context: ./misc/
+      context: ./misc/dogstatsd/
       docker:
-        dockerfile: Dockerfile-dogstatsd.ms
+        dockerfile: Dockerfile.ms
 deploy:
   kubectl:
     manifests:
