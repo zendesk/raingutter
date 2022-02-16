@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: raingutter
-          image: zendesk/raingutter
+          image: raingutter
           env:
             - name: RG_USE_SOCKET_STATS  # default
               value: 'true'
@@ -46,7 +46,7 @@ spec:
             readOnlyRootFilesystem: true
           imagePullPolicy: IfNotPresent
         - name: mock-dogstatsd
-          image: zendesk/mock-dogstatsd
+          image: mock-dogstatsd
           imagePullPolicy: IfNotPresent
       terminationGracePeriodSeconds: 1
       restartPolicy: Always

@@ -1,23 +1,26 @@
+---
 apiVersion: skaffold/v2beta23
 kind: Config
 build:
+  local:
+    push: false
   artifacts:
-  - image: zendesk/raingutter
-    docker:
-      dockerfile: Dockerfile
-      buildArgs:
-        version: "161"
-  - image: zendesk/mock-raindrops
-    context: ./misc/
-    docker:
-      dockerfile: Dockerfile-raindrops.ms
-  - image: zendesk/mock-dogstatsd
-    context: ./misc/
-    docker:
-      dockerfile: Dockerfile-dogstatsd.ms
+    - image: raingutter
+      docker:
+        dockerfile: Dockerfile
+        buildArgs:
+          version: "161"
+    - image: mock-raindrops
+      context: ./misc/raindrops/
+      docker:
+        dockerfile: Dockerfile.ms
+    - image: mock-dogstatsd
+      context: ./misc/dogstatsd/
+      docker:
+        dockerfile: Dockerfile.ms
 deploy:
   kubectl:
     manifests:
-    - kubernetes/unicorn-raindrops.yml
-    - kubernetes/unicorn-socket-stats.yml
-    - kubernetes/puma-socket-stats.yml
+      - kubernetes/unicorn-raindrops.yml
+      - kubernetes/unicorn-socket-stats.yml
+      - kubernetes/puma-socket-stats.yml
