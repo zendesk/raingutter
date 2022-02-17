@@ -1,0 +1,9 @@
+apiVersion: zende.sk/v1
+kind: Metadata
+project: raingutter
+product: guide
+workflows:
+  - none
+  - of
+  - your
+  - business
