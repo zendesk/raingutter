@@ -2,7 +2,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: rg
+  name: rg-puma-socket-stats
   namespace: puma-socket-stats
 spec:
   selector:
