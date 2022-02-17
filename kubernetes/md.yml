@@ -14,6 +14,7 @@ workflows:
   - wat
   - greatness indeed
 yessir: weeee
+mjello: true
 pkgs:
   - name: foo
     foo: true
