@@ -1,5 +1,7 @@
 apiVersion: zende.sk/v1
 kind: Metadata
+metadata:
+  name: raingutter
 project: raingutter
 product: guide
 workflows:
