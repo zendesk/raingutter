@@ -14,3 +14,8 @@ workflows:
   - wat
   - greatness indeed
 yessir: weeee
+pkgs:
+  - name: foo
+    foo: true
+  - name: bar
+    bar: true
