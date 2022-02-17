@@ -20,3 +20,5 @@ pkgs:
     foo: true
   - name: bar
     bar: true
+  - name: winkyface
+    winkyface: true
