@@ -3,6 +3,8 @@ kind: Metadata
 metadata:
   name: raingutter
 project: raingutter
+nested:
+  new: true
 product: guide
 workflows:
   - none
