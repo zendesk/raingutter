@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/DataDog/datadog-go/statsd"
+	"github.com/DataDog/datadog-go/v5/statsd"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -23,6 +23,7 @@ var (
 	podName      = os.Getenv("POD_NAME")
 	podNameSpace = os.Getenv("POD_NAMESPACE")
 	project      = os.Getenv("PROJECT")
+	statsdTags   []string
 )
 
 type raingutter struct {
@@ -321,6 +322,28 @@ func main() {
 
 	r := raingutter{}
 
+	// Add k8s tags
+	if podName != "" {
+		tag := "pod_name:" + podName
+		statsdTags = append(statsdTags, tag)
+	}
+
+	if podNameSpace != "" {
+		tag := "pod_namespace:" + podNameSpace
+		statsdTags = append(statsdTags, tag)
+	}
+
+	if project != "" {
+		tag := "project:" + project
+		statsdTags = append(statsdTags, tag)
+	}
+
+	// Add extra tags
+	if statsdExtraTags != "" {
+		tags := strings.Split(statsdExtraTags, ",")
+		statsdTags = append(statsdTags, tags...)
+	}
+
 	// Create an http client
 	timeout := time.Duration(3 * time.Second)
 	httpClient := http.Client{
@@ -329,34 +352,9 @@ func main() {
 
 	// Create a statsd udp client
 	statsdURL := statsdHost + ":" + statsdPort
-	statsdClient, err := statsd.New(statsdURL)
+	statsdClient, err := statsd.New(statsdURL, statsd.WithNamespace(statsdNamespace), statsd.WithTags(statsdTags))
 	if err != nil {
 		log.Error(err)
-	}
-
-	// Define namespace
-	statsdClient.Namespace = statsdNamespace
-
-	// Add k8s tags
-	if podName != "" {
-		tag := "pod_name:" + podName
-		statsdClient.Tags = append(statsdClient.Tags, tag)
-	}
-
-	if podNameSpace != "" {
-		tag := "pod_namespace:" + podNameSpace
-		statsdClient.Tags = append(statsdClient.Tags, tag)
-	}
-
-	if project != "" {
-		tag := "project:" + project
-		statsdClient.Tags = append(statsdClient.Tags, tag)
-	}
-
-	// Add extra tags
-	if statsdExtraTags != "" {
-		tags := strings.Split(statsdExtraTags, ",")
-		statsdClient.Tags = append(statsdClient.Tags, tags...)
 	}
 
 	// Setup os signals catching
