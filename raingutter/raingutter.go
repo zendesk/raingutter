@@ -362,7 +362,8 @@ func main() {
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		s := <-sigs
-		log.Fatal("Received signal: ", s)
+		log.Info("Received signal: ", s)
+		os.Exit(0)
 	}()
 
 	tc := totalConnections{Count: 0}
