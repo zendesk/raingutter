@@ -35,20 +35,20 @@ func stripMenu(s string) string {
 
 // GetSocketStats combines the tcp and tcp6 /proc/net files to get a list of all ipv4 and ipv6 sockets
 func GetSocketStats() (string, error) {
-	s6, err := ioutil.ReadFile("/proc/net/tcp6")
-	if err != nil {
-		return "", err
-	}
-	ipv6sockets := stripMenu(string(s6))
-
 	s4, err := ioutil.ReadFile("/proc/net/tcp")
 	if err != nil {
 		return "", err
 	}
 	ipv4sockets := stripMenu(string(s4))
-	sockets := ipv4sockets + "\n" + ipv6sockets
 
-	return sockets, nil
+	s6, err := ioutil.ReadFile("/proc/net/tcp6")
+	// ipv6 can be disabled, so return ipv4 only.
+	if err != nil {
+		return ipv4sockets, err
+	}
+
+	ipv6sockets := stripMenu(string(s6))
+	return ipv4sockets + "\n" + ipv6sockets, nil
 }
 
 // ParseSocket parses a line of /proc/net/tcp and returns a struct with some relevant info
