@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
-	"strconv"
 	"testing"
 	"time"
 )
@@ -87,46 +85,6 @@ func TestParse(t *testing.T) {
 			t.Errorf("Parse(%v): expected %v, actual %v", out.n, out.expected, actual)
 		}
 	}
-}
-
-func fakeExecCommand(command string, args ...string) *exec.Cmd {
-	cs := []string{"-test.run=TestHelperProcess", "--", command}
-	cs = append(cs, args...)
-	cmd := exec.Command(os.Args[0], cs...)
-	cmd.Env = []string{"GO_WANT_HELPER_PROCESS=1"}
-	return cmd
-}
-
-func TestUnicornWorkersPgrep(t *testing.T) {
-	execCommand = fakeExecCommand
-	defer func() { execCommand = exec.Command }()
-	tc := totalConnections{Count: 0}
-	getWorkers(&tc)
-	result, err := strconv.ParseFloat(commandResult, 64)
-	if err != nil {
-		t.Errorf("%v", err)
-	}
-	if tc.Count != result-1 {
-		t.Errorf("Unicorn workers is: %v. It should be %v", tc.Count, result-1)
-	}
-}
-
-func TestHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
-		return
-	}
-	// mocking "pgrep -fc helper.sh"
-	fmt.Fprintf(os.Stdout, commandResult)
-	os.Exit(0)
-}
-
-func TestUnicornWorkerPgrepError(t *testing.T) {
-	tc := totalConnections{Count: 0}
-	getWorkers(&tc)
-	if tc.Count != 0 {
-		t.Errorf("Unicorn workers is: %v. It should be 0", tc.Count)
-	}
-
 }
 
 func TestUnicornWorkerEnv(t *testing.T) {

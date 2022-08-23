@@ -69,33 +69,12 @@ func getThreads(tc *totalConnections) {
 func getWorkers(tc *totalConnections) {
 	var (
 		workers float64
-		cmdOut  []byte
 		err     error
 	)
 	unicornWorkers := os.Getenv("UNICORN_WORKERS")
-	// If the UNICORN_WORKERS env var is empty fallback on pgrep
-	// This is meant to be used on VM or bare metal
-	if unicornWorkers == "" {
-		binary, lookErr := exec.LookPath("pgrep")
-		checkFatal(lookErr)
-		args := []string{"-fc", "helper.sh"}
-		if cmdOut, err = execCommand(binary, args...).CombinedOutput(); err != nil {
-			log.Error(binary, " returned: ", err)
-			workers = 0
-			log.Warn("Unicorn workers count set to 0")
-			tc.Count = workers
-		} else {
-			out := string(cmdOut)
-			unicorns, err := strconv.ParseFloat(strings.TrimSpace(out), 64)
-			checkFatal(err)
-			// remove the master from the total running unicorns
-			tc.Count = unicorns - 1
-		}
-	} else {
-		workers, err := strconv.ParseFloat(unicornWorkers, 64)
-		checkFatal(err)
-		tc.Count = workers
-	}
+	workers, err = strconv.ParseFloat(unicornWorkers, 64)
+	checkFatal(err)
+	tc.Count = workers
 }
 
 // Fetch the raindrops output and convert it to a slice on strings
