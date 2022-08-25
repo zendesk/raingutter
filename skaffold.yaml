@@ -13,11 +13,7 @@ build:
     - image: mock-raindrops
       context: ./misc/raindrops/
       docker:
-        dockerfile: Dockerfile.ms
-    - image: mock-dogstatsd
-      context: ./misc/dogstatsd/
-      docker:
-        dockerfile: Dockerfile.ms
+        dockerfile: Dockerfile
 deploy:
   kubectl:
     manifests:

@@ -51,8 +51,8 @@ spec:
             runAsNonRoot: true
             readOnlyRootFilesystem: true
           imagePullPolicy: IfNotPresent
-        - name: mock-dogstatsd
-          image: mock-dogstatsd
+        - name: statsd-logger
+          image: zendesk/statsd-logger
           imagePullPolicy: IfNotPresent
         - name: mock-raindrops
           image: mock-raindrops

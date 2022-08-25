@@ -45,8 +45,8 @@ spec:
             runAsNonRoot: true
             readOnlyRootFilesystem: true
           imagePullPolicy: IfNotPresent
-        - name: mock-dogstatsd
-          image: mock-dogstatsd
+        - name: statsd-logger
+          image: zendesk/statsd-logger
           imagePullPolicy: IfNotPresent
       terminationGracePeriodSeconds: 1
       restartPolicy: Always
