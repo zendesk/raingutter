@@ -13,7 +13,7 @@ jobs:
       GOPATH: ${{ github.workspace }}/gopath
       GOPRIVATE: github.com/zendesk/*
     steps:
-    - uses: zendesk/checkout@v2
+    - uses: zendesk/checkout@v3
       with:
         path: ${{ github.workspace }}/gopath/src/github.com/zendesk/${{ github.repository }}
     - uses: zendesk/setup-go@v2
