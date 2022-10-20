@@ -1,4 +1,4 @@
-FROM golang:1.17.1-alpine3.14 as builder
+FROM golang:1.19.2-alpine3.16 as builder
 
 RUN addgroup -g 1000 -S raingutter && adduser -u 1000 -S raingutter -G raingutter
 
