@@ -4,6 +4,10 @@ on:
     branches:
     - master
   pull_request:
+
+env:
+  AWS_PROFILE: ecr-publish
+
 jobs:
   main:
     name: go-lang
@@ -25,5 +29,5 @@ jobs:
         git config --global url."https://${{ secrets.ORG_GITHUB_TOKEN }}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
         cd ${{ github.workspace }}/gopath/src/github.com/zendesk/${{ github.repository }}
         go test ./raingutter -v
-        docker run --rm -i hadolint/hadolint < Dockerfile
+        docker run --rm -i gcr.io/docker-images-180022/dockerhub-mirror/hadolint/hadolint < Dockerfile
 
