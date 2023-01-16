@@ -9,7 +9,7 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -a -mod=vendor -ldflags "-X main.version=${version}" -o /raingutter raingutter/raingutter.go raingutter/socket_stats.go raingutter/prometheus.go
 
-FROM scratch
+FROM scratch as scratch-base
 
 COPY --from=builder /raingutter /
 COPY --from=builder /etc/passwd /etc/passwd
