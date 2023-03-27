@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	github.com/DataDog/datadog-go/v5 v5.0.2
-	github.com/prometheus/client_golang v1.11.0
+	github.com/prometheus/client_golang v1.11.1
 	github.com/sirupsen/logrus v1.8.1
 )
 
