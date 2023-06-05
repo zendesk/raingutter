@@ -1,4 +1,4 @@
-FROM golang:1.16.3-alpine3.13 as builder
+FROM golang:1.20-alpine as builder
 
 LABEL maintainer "GUIDEOPS <guideops@zendesk.com>"
 
