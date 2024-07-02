@@ -30,7 +30,7 @@
 
 - [ ] Are all monitors for this service/feature documented?
 - [ ] Do all service/feature monitors link to a Runbook, or provide an escalation policy within them?
-- [ ] Do you have monitoring and alerting that follows the [REDS pattern](https://phd.zende.sk/services?products=Guide)?
+- [ ] Do you have monitoring and alerting that follows the [REDS pattern](https://lookerstudio.google.com/reporting/82ffc0dd-af9b-4706-adb0-2c715532f8e7/page/p_wd61cm6odd?params=%7B%22df90%22:%22include%25EE%2580%25800%25EE%2580%2580IN%25EE%2580%2580Guide%22%7D)?
 - [ ] Have you reviewed your alert thresholds in the last 90 days?
 - [ ] Is your DEPLOY.md accurate?
 - [ ] Is a Datadog [service deploy dashboard](https://zendesk.datadoghq.com/dashboard/4x8-36h-rst/help-center-status-overview?from_ts=1648641337855&to_ts=1648641637855&live=true) linked in Cerebro?
