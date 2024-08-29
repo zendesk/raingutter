@@ -8,7 +8,7 @@ on:
 
 jobs:
   github_release:
-    runs-on: ubuntu-latest 
+    runs-on: [zendesk-stable] 
     steps:
       # Check out the `master` branch
       - uses: zendesk/checkout@v4
@@ -19,7 +19,7 @@ jobs:
         with:
           github_token: ${{ github.token }}
           version_scheme: semantic
-          version_type: patch
+          version_type: major
       # Create a new GitHub release
       - name: Create release
         id: create_release
