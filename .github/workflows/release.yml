@@ -1,0 +1,51 @@
+name: Github Release
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+
+jobs:
+  github_release:
+    runs-on: [ zendesk-stable, self-hosted ]
+    steps:
+      # Check out the `master` branch
+      - uses: zendesk/checkout@v4
+      # Get the release version type
+      - name: Get release version type
+        id: get_release_data
+        env:
+          DEFAULT_VERSION_TYPE: minor
+          LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          if [ "$LABELS_JSON" = "[]" ]; then
+            _TYPE=${DEFAULT_VERSION_TYPE}
+          else
+            _TYPE=$(echo $LABELS_JSON | jq -r 'map(select(. | startswith("release."))) | first | .[8:]')
+          fi
+          echo "type=${_TYPE}" >> $GITHUB_OUTPUT
+      # Compute the next semantic version
+      - name: Compute release tag
+        id: compute_tag
+        uses: zendesk/compute-tag@v10
+        with:
+          github_token: ${{ github.token }}
+          version_scheme: semantic
+          version_type: ${{ steps.get_release_data.outputs.type }}
+      # Create a new GitHub release
+      - name: Create release
+        id: create_release
+        uses: zendesk/create-release@v1.1.4
+        with:
+          tag_name: ${{ steps.compute_tag.outputs.next_tag }}
+          release_name: ${{ steps.compute_tag.outputs.next_tag }}
+          commitish: ${{ github.git_ref }}
+          body: |
+            ### Links
+            See the full [CHANGELOG](https://github.com/${{ github.repository }}/tree/master/CHANGELOG.md)
+            for full release details.
+
+            * [Changes since last release](https://github.com/${{ github.repository }}/compare/${{ steps.compute_tag.outputs.previous_tag }}..${{ steps.compute_tag.outputs.next_tag }})
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
