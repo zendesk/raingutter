@@ -1,8 +1,9 @@
 name: Github Release
 
 on:
-  pull_request:
-    types: [opened]
+  push:
+    branches:
+      - master
   workflow_dispatch:
 
 jobs:
@@ -11,7 +12,7 @@ jobs:
     steps:
       # Check out the `master` branch
       - uses: zendesk/checkout@v4
-      # Compute the next semantic version
+      # Compute the next semantic version.
       - name: Compute release tag
         id: compute_tag
         uses: zendesk/compute-tag@v10
