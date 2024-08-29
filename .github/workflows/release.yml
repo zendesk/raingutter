@@ -12,6 +12,19 @@ jobs:
     steps:
       # Check out the `master` branch
       - uses: zendesk/checkout@v4
+      #get the release version type
+      - name: Get release version type
+        id: get_release_data
+        env:
+          DEFAULT_VERSION_TYPE: minor
+          LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          if [ "$LABELS_JSON" = "[]" ]; then
+            _TYPE=${DEFAULT_VERSION_TYPE}
+          else
+            _TYPE=$(echo $LABELS_JSON | jq -r 'map(select(. | startswith("release."))) | first | .[8:]')
+          fi
+          echo "type=${_TYPE}" >> $GITHUB_OUTPUT
       # Compute the next semantic version.
       - name: Compute release tag
         id: compute_tag
