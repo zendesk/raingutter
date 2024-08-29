@@ -1,8 +1,9 @@
 name: Github Release
 
 on:
-  pull_request:
-    types: [opened]
+  push:
+    branches:
+      - master
   workflow_dispatch:
 
 jobs:
