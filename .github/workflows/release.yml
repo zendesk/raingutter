@@ -18,7 +18,8 @@ jobs:
         uses: zendesk/compute-tag@v18
         with:
           github_token: ${{ github.token }}
-          version_scheme: semantic
+          version_scheme: continuous
+          version_type: major
       # Create a new GitHub release
       - name: Create release
         id: create_release
