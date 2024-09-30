@@ -19,7 +19,6 @@ jobs:
         with:
           github_token: ${{ github.token }}
           version_scheme: semantic
-          version_type: major
       # Create a new GitHub release
       - name: Create release
         id: create_release
