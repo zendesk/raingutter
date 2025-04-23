@@ -1,6 +1,6 @@
 module github.com/zendesk/raingutter
 
-go 1.22
+go 1.23.8
 
 require (
 	github.com/DataDog/datadog-go/v5 v5.3.0
